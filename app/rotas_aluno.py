@@ -185,14 +185,16 @@ def _flatten_aulas(curso: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 @router.get("/meus-cursos")
 def meus_cursos(authorization: Optional[str] = Header(None)):
-    """
-    Retorna todos os cursos que o aluno pode acessar (1 por curso),
-    com base nas matrículas encontradas.
-    """
     token = _get_bearer_token(authorization)
     ctx = _get_aluno_context(token)
 
-    return {"cursos": ctx.get("cursos", [])}
+    # Adicionamos o nome do aluno no retorno
+    return {
+        "nome": ctx.get("nome", "Aluno"),
+        "cursos": ctx.get("cursos", [])
+    }
+
+    
 
 
 
@@ -264,79 +266,184 @@ def curso_estrutura(curso_slug: str, authorization: Optional[str] = Header(None)
 
 @router.get("/aula/{id_aula}")
 def obter_aula(id_aula: int, authorization: Optional[str] = Header(None)):
-    """
-    Retorna o conteúdo da aula.
-    Se houver conteúdo personalizado do professor da turma do curso, entrega esse.
-    """
     token = _get_bearer_token(authorization)
     ctx = _get_aluno_context(token)
 
-    # Busca a aula base
-    aula_resp = (
-        supabase.table("aulas")
-        .select("id, titulo, conteudo, modulo_id")
-        .eq("id", id_aula)
-        .limit(1)
-        .execute()
-    )
-    if not aula_resp.data:
-        raise HTTPException(status_code=404, detail="Aula não encontrada")
-
-    aula = aula_resp.data[0]
-    conteudo = aula.get("conteudo") or ""
-
-    # Descobre de qual curso essa aula é (aula -> modulo -> curso)
-    mod_resp = (
-        supabase.table("modulos")
-        .select("curso_id")
-        .eq("id", aula["modulo_id"])
-        .limit(1)
-        .execute()
-    )
-    if not mod_resp.data:
-        raise HTTPException(status_code=500, detail="Módulo inválido para esta aula")
-
-    curso_id = mod_resp.data[0]["curso_id"]
-
-    # ✅ SUA TABELA cursos NÃO TEM slug. Pegamos só o titulo.
-    curso_resp = (
-        supabase.table("cursos")
-        .select("id, titulo")
-        .eq("id", curso_id)
-        .limit(1)
-        .execute()
-    )
-    if not curso_resp.data:
-        raise HTTPException(status_code=500, detail="Curso não encontrado para esta aula")
-
-    curso_row = curso_resp.data[0]
-    curso_slug_aula = _slugify(curso_row.get("titulo") or "")
-
-    info = (ctx.get("cursos_by_slug") or {}).get(curso_slug_aula)
-    if not info:
-        raise HTTPException(status_code=403, detail="Curso não permitido")
-
-    turma = info["turma"]
-    id_professor = turma.get("id_professor")
-
-    # Conteúdo personalizado (por professor)
-    if id_professor:
-        pers_resp = (
-            supabase.table("conteudos_personalizados")
-            .select("conteudo")
-            .eq("id_aula", id_aula)
-            .eq("id_professor", id_professor)
+    try:
+        aula_resp = (
+            supabase.table("aulas")
+            .select("*")  # <- ajuda a não quebrar por coluna errada (temporário)
+            .eq("id", id_aula)
             .limit(1)
             .execute()
         )
-        if pers_resp.data and pers_resp.data[0].get("conteudo"):
-            conteudo = pers_resp.data[0]["conteudo"]
+        if not aula_resp.data:
+            raise HTTPException(status_code=404, detail="Aula não encontrada")
 
+        aula = aula_resp.data[0]
+        conteudo = aula.get("conteudo") or ""
+
+        # aceita modulo_id ou id_modulo (caso seu banco use outro nome)
+        modulo_id = aula.get("modulo_id") or aula.get("id_modulo")
+        if not modulo_id:
+            raise HTTPException(status_code=500, detail="Aula sem modulo_id/id_modulo no banco")
+
+        mod_resp = (
+            supabase.table("modulos")
+            .select("*")  # <- temporário
+            .eq("id", modulo_id)
+            .limit(1)
+            .execute()
+        )
+        if not mod_resp.data:
+            raise HTTPException(status_code=500, detail="Módulo inválido para esta aula")
+
+        mod = mod_resp.data[0]
+        curso_id = mod.get("curso_id") or mod.get("id_curso")
+        if not curso_id:
+            raise HTTPException(status_code=500, detail="Módulo sem curso_id/id_curso no banco")
+
+        curso_resp = (
+            supabase.table("cursos")
+            .select("*")  # <- temporário
+            .eq("id", curso_id)
+            .limit(1)
+            .execute()
+        )
+        if not curso_resp.data:
+            raise HTTPException(status_code=500, detail="Curso não encontrado para esta aula")
+
+        curso_row = curso_resp.data[0]
+        curso_slug_aula = _slugify(curso_row.get("titulo") or "")
+
+        info = (ctx.get("cursos_by_slug") or {}).get(curso_slug_aula)
+        if not info:
+            raise HTTPException(status_code=403, detail="Curso não permitido")
+
+        turma = info["turma"]
+        id_professor = turma.get("id_professor")
+
+        if id_professor:
+            pers_resp = (
+                supabase.table("conteudos_personalizados")
+                .select("conteudo")
+                .eq("id_aula", id_aula)
+                .eq("id_professor", id_professor)
+                .limit(1)
+                .execute()
+            )
+            if pers_resp.data and pers_resp.data[0].get("conteudo"):
+                conteudo = pers_resp.data[0]["conteudo"]
+
+        return {
+            "id": aula.get("id"),
+            "titulo": aula.get("titulo"),
+            "conteudo": conteudo,
+            "updated_at": _now_iso(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Isso vai aparecer no Render Logs:
+        print("ERRO obter_aula:", repr(e))
+        raise HTTPException(status_code=500, detail=f"Erro interno obter_aula: {e}")
+
+from pydantic import BaseModel
+
+class PerfilUpdate(BaseModel):
+    nome_completo: Optional[str] = None
+    telefone: Optional[str] = None
+    email: Optional[str] = None
+
+class SenhaUpdate(BaseModel):
+    senha_atual: Optional[str] = None
+    senha_nova: str
+
+
+@router.get("/perfil")
+def get_perfil(authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    user_id = _get_user_id_from_token(token)
+
+    # pega email do auth
+    try:
+        user = supabase.auth.get_user(token)
+        email = getattr(user.user, "email", None)
+    except Exception:
+        email = None
+
+    # pega dados do aluno (select * pra não quebrar se seu schema variar)
+    aluno_resp = (
+        supabase.table("tb_alunos")
+        .select("*")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not aluno_resp.data:
+        raise HTTPException(status_code=404, detail="Aluno não encontrado")
+
+    aluno = aluno_resp.data[0]
     return {
-        "id": aula.get("id"),
-        "titulo": aula.get("titulo"),
-        "conteudo": conteudo,
-        "updated_at": _now_iso(),
+        "email": email,
+        "nome_completo": aluno.get("nome_completo") or "",
+        "telefone": aluno.get("telefone") or "",
+        # se você tiver mais colunas, pode expor aqui:
+        # "cpf": aluno.get("cpf") or "",
+        # "data_nascimento": aluno.get("data_nascimento") or "",
     }
 
 
+@router.put("/perfil")
+def update_perfil(payload: PerfilUpdate, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    user_id = _get_user_id_from_token(token)
+
+    # 1) atualiza tabela tb_alunos (somente campos enviados)
+    update_data: Dict[str, Any] = {}
+    if payload.nome_completo is not None:
+        update_data["nome_completo"] = payload.nome_completo.strip()
+    if payload.telefone is not None:
+        update_data["telefone"] = payload.telefone.strip()
+
+    if update_data:
+        supabase.table("tb_alunos").update(update_data).eq("user_id", user_id).execute()
+
+    # 2) atualiza email no auth (se enviado)
+    if payload.email is not None and payload.email.strip():
+        try:
+            supabase.auth.admin.update_user_by_id(user_id, {"email": payload.email.strip()})
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Erro ao atualizar e-mail: {e}")
+
+    return {"ok": True}
+
+
+@router.put("/senha")
+def update_senha(payload: SenhaUpdate, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    user_id = _get_user_id_from_token(token)
+
+    # (opcional) valida senha atual
+    if payload.senha_atual:
+        try:
+            user = supabase.auth.get_user(token)
+            email = getattr(user.user, "email", None)
+            if not email:
+                raise HTTPException(status_code=400, detail="Email do usuário não encontrado para validar senha atual")
+
+            # tenta login com senha atual
+            supabase.auth.sign_in_with_password({"email": email, "password": payload.senha_atual})
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Senha atual inválida")
+
+    # troca senha (admin)
+    try:
+        supabase.auth.admin.update_user_by_id(user_id, {"password": payload.senha_nova})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao atualizar senha: {e}")
+
+    return {"ok": True}
