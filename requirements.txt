@@ -6,7 +6,6 @@ pydantic
 requests
 email-validator
 python-multipart
-pygame==2.6.1
-pygbag==0.9.2
+
 
 
