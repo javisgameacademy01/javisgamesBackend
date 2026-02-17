@@ -8,8 +8,10 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 import requests
 import logging
-from datetime import datetime
+from typing import Optional
 from app.modelos import (
+    FestaAniversarioCreate,
+    FestaAniversarioUpdate,
     FuncionarioEdicaoData,
     PerfilUpdateData,
     ReposicaoEdicaoData,
@@ -435,42 +437,81 @@ def get_conteudo_aula(titulo: str):
 
 @router.post("/cadastrar-aluno")
 def admin_cadastrar_aluno(dados: NovoAlunoData, authorization: str = Header(None)):
-    if not authorization: raise HTTPException(status_code=401)
-    token = authorization.split(" ")[1]
+    # Validação do header
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token ausente")
+
+    token = authorization.split(" ", 1)[1]
     ctx = get_contexto_usuario(token)
-    
+
+    # Permissão (alinha com seu front: menu-cadastro só aparece no 8+)
+    if ctx["nivel"] < 8:
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+    new_user_id = None
+    novo_id_aluno = None
+
     try:
-        user_auth = supabase.auth.admin.create_user({ "email": dados.email, "password": dados.senha, "email_confirm": True })
+        # 1) Cria o usuário no Supabase Auth
+        user_auth = supabase.auth.admin.create_user({
+            "email": dados.email,
+            "password": dados.senha,
+            "email_confirm": True
+        })
         new_user_id = user_auth.user.id
 
+        # 2) Formata nascimento (se você usa YYYYMMDD no banco)
         nasc_formatado = None
-        if dados.data_nascimento: nasc_formatado = dados.data_nascimento.replace("-", "")[:8]
+        if dados.data_nascimento:
+            nasc_formatado = dados.data_nascimento.replace("-", "")[:8]
 
+        # 3) Cria aluno (tb_alunos)
         aluno_resp = supabase.table("tb_alunos").insert({
             "nome_completo": dados.nome,
             "cpf": dados.cpf,
-            "email": dados.email,
+            "email": dados.email,              # precisa existir a coluna
             "celular": dados.celular,
             "telefone": dados.telefone,
             "data_nascimento": nasc_formatado,
             "user_id": new_user_id,
-            "id_unidade": ctx['id_unidade']
+            "id_unidade": ctx["id_unidade"],
         }).execute()
-        
-        if not aluno_resp.data: raise Exception("Erro aluno")
-        novo_id_aluno = aluno_resp.data[0]['id_aluno']
 
-        supabase.table("tb_matriculas").insert({
+        if not aluno_resp.data:
+            raise Exception("Falha ao inserir aluno em tb_alunos.")
+
+        novo_id_aluno = aluno_resp.data[0]["id_aluno"]
+
+        # 4) Cria matrícula (tb_matriculas)
+        mat_resp = supabase.table("tb_matriculas").insert({
             "id_aluno": novo_id_aluno,
             "codigo_turma": dados.turma_codigo,
-            "id_vendedor": ctx['id_colaborador'],
+            "id_vendedor": ctx["id_colaborador"],
             "status_financeiro": "Ok"
         }).execute()
 
-        return {"message": "Sucesso!"}
+        if not mat_resp.data:
+            raise Exception("Falha ao inserir matrícula em tb_matriculas.")
+
+        return {"message": "Sucesso!", "id_aluno": novo_id_aluno, "user_id": new_user_id}
+
     except Exception as e:
-        print(f"Erro cadastro: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        # Cleanup do que foi criado (rollback)
+        # Se inseriu aluno mas não completou, remove aluno
+        if novo_id_aluno:
+            try:
+                supabase.table("tb_alunos").delete().eq("id_aluno", novo_id_aluno).execute()
+            except Exception:
+                pass
+
+        # Se criou usuário no Auth, remove usuário
+        if new_user_id:
+            try:
+                supabase.auth.admin.delete_user(new_user_id)  # :contentReference[oaicite:1]{index=1}
+            except Exception:
+                pass
+
+        raise HTTPException(status_code=400, detail=f"Erro cadastro: {str(e)}")
 
 
 @router.get("/listar-alunos")
@@ -557,89 +598,77 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
 
 @router.get("/agenda-geral")
 def admin_agenda(authorization: str = Header(None)):
-    if not authorization: raise HTTPException(status_code=401)
-    token = authorization.split(" ")[1]
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token ausente")
+
+    token = authorization.split(" ", 1)[1]
     ctx = get_contexto_usuario(token)
+
     try:
         eventos = []
-        
-        # 1. BUSCA REPOSIÇÕES
-        if ctx['nivel'] < 9:
-            # Filtra alunos da unidade para pegar os IDs
-            alunos = supabase.table("tb_alunos").select("id_aluno").eq("id_unidade", ctx['id_unidade']).execute()
-            ids = [a['id_aluno'] for a in alunos.data]
-            
-            # Busca reposições desses alunos
-            if not ids: 
-                resp_repo = None # Se não tem alunos, não tem reposição
-            else:
-                resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").in_("id_aluno", ids).execute()
+
+        # 1) BUSCA REPOSIÇÕES (único tipo que ficará na agenda)
+        if ctx["nivel"] < 9:
+            alunos = (
+                supabase.table("tb_alunos")
+                .select("id_aluno")
+                .eq("id_unidade", ctx["id_unidade"])
+                .execute()
+            )
+            ids = [a["id_aluno"] for a in (alunos.data or [])]
+
+            resp_repo = None
+            if ids:
+                resp_repo = (
+                    supabase.table("tb_reposicoes")
+                    .select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)")
+                    .in_("id_aluno", ids)
+                    .execute()
+                )
         else:
-            # Diretor vê tudo
-            resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").execute()
-        
+            resp_repo = (
+                supabase.table("tb_reposicoes")
+                .select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)")
+                .execute()
+            )
+
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
-                # Extrai nomes com segurança
                 nome_aluno = "Aluno?"
-                if rep.get('tb_alunos'): 
-                    nome_aluno = rep['tb_alunos'].get('nome_completo', 'Aluno?')
-                
+                if rep.get("tb_alunos"):
+                    nome_aluno = rep["tb_alunos"].get("nome_completo", "Aluno?")
+
                 nome_prof = "?"
-                if rep.get('tb_colaboradores'): 
-                    nome_prof = rep['tb_colaboradores'].get('nome_completo', '?')
-                
+                if rep.get("tb_colaboradores"):
+                    nome_prof = rep["tb_colaboradores"].get("nome_completo", "?")
+
                 eventos.append({
-                    "id": rep['id'],
+                    "id": rep["id"],
                     "title": f"🔄 Reposição: {nome_aluno}",
-                    "start": rep['data_reposicao'],
+                    "start": rep["data_reposicao"],
                     "color": "#ff4d4d",
                     "tipo": "reposicao",
                     "nome_aluno": nome_aluno,
                     "nome_prof": nome_prof,
-                    "conteudo": rep['conteudo_aula'],
-                    "turma": rep['codigo_turma'],
-                    "presenca": rep['presenca'],
-                    "observacoes": rep['observacoes'],
-                    "arquivo": rep['arquivo_assinatura'],
-                    "extendedProps": { 
-                        "conteudo": rep['conteudo_aula'],
-                        "id_criador": rep['criado_por']
+                    "conteudo": rep.get("conteudo_aula"),
+                    "turma": rep.get("codigo_turma"),
+                    "presenca": rep.get("presenca"),
+                    "observacoes": rep.get("observacoes"),
+                    "arquivo": rep.get("arquivo_assinatura"),
+                    "extendedProps": {
+                        "conteudo": rep.get("conteudo_aula"),
+                        "id_criador": rep.get("criado_por")
                     }
                 })
 
-        # 2. BUSCA TURMAS (Aulas Recorrentes)
-        query_t = supabase.table("tb_turmas").select("*, tb_colaboradores(nome_completo)").in_("status", ["Em Andamento", "Planejada"])
-        if ctx['nivel'] < 9: 
-            query_t = query_t.eq("id_unidade", ctx['id_unidade'])
-        
-        resp_turmas = query_t.execute()
-
-        for turma in resp_turmas.data:
-            if not turma['data_inicio'] or not turma['qtd_aulas'] or not turma['horario']: continue
-            try:
-                dt_inicio = datetime.strptime(turma['data_inicio'], "%Y-%m-%d")
-                dia_alvo = DIAS_MAPA.get(turma['dia_semana'].split("-")[0].strip(), 0) 
-                dias_diff = (dia_alvo - dt_inicio.weekday() + 7) % 7
-                dt_atual = dt_inicio + timedelta(days=dias_diff)
-                hora_ini = turma['horario'].split("-")[0].strip()
-                nome_prof_t = turma['tb_colaboradores']['nome_completo'] if turma.get('tb_colaboradores') else "Sem Prof"
-
-                for i in range(turma['qtd_aulas']):
-                    eventos.append({
-                        "id": f"aula-{turma['codigo_turma']}-{i}",
-                        "title": f"📚 {turma['codigo_turma']} - {turma['nome_curso']} ({nome_prof_t})",
-                        "start": f"{dt_atual.strftime('%Y-%m-%d')}T{hora_ini}:00",
-                        "color": "#0088cc",
-                        "tipo": "aula"
-                    })
-                    dt_atual += timedelta(days=7)
-            except: continue
+        # ✅ REMOVIDO: eventos de "aula" das turmas (datas das turmas)
 
         return eventos
+
     except Exception as e:
-        print(f"Erro agenda: {e}") 
+        print(f"Erro agenda: {e}")
         return []
+
 
 
 @router.put("/reposicao-completa/{id_repo}")
@@ -1382,39 +1411,375 @@ def admin_listar_cursos_didaticos(authorization: str = Header(None)):
         return []
 @router.post("/criar-login-aluno")
 def criar_login_aluno(dados: NovoUsuarioData, authorization: str = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token ausente")
+
+    token = authorization.split(" ", 1)[1]
+    ctx = get_contexto_usuario(token)
+
+    if ctx["nivel"] < 8:
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+    new_user_id = None
+
+    try:
+        # Verifica se aluno existe e ainda não tem user_id
+        try:
+            aluno = supabase.table("tb_alunos")\
+                .select("id_aluno, user_id")\
+                .eq("id_aluno", dados.id_aluno)\
+                .single()\
+                .execute()
+        except Exception:
+            aluno = None
+
+        if not aluno or not aluno.data:
+            raise HTTPException(status_code=404, detail="Aluno não encontrado.")
+
+        if aluno.data.get("user_id"):
+            raise HTTPException(status_code=400, detail="Aluno já possui login.")
+
+        # Cria usuário no Auth
+        user_auth = supabase.auth.admin.create_user({
+            "email": dados.email,
+            "password": dados.senha,
+            "email_confirm": True
+        })
+        new_user_id = user_auth.user.id
+
+        # Atualiza tb_alunos com user_id e email
+        up = supabase.table("tb_alunos").update({
+            "email": dados.email,      # precisa existir a coluna
+            "user_id": new_user_id
+        }).eq("id_aluno", dados.id_aluno).execute()
+
+        if not up.data:
+            raise Exception("Falha ao atualizar tb_alunos com user_id/email.")
+
+        return {"message": "Login criado com sucesso!", "user_id": new_user_id}
+
+    except HTTPException:
+        # repassa erros HTTP corretamente
+        raise
+    except Exception as e:
+        # rollback: remove usuário do Auth se já criou
+        if new_user_id:
+            try:
+                supabase.auth.admin.delete_user(new_user_id)  # :contentReference[oaicite:2]{index=2}
+            except Exception:
+                pass
+
+        raise HTTPException(status_code=500, detail=f"Erro ao criar login: {str(e)}")
+
+@router.put("/editar-aluno/{id_aluno}")
+def admin_editar_aluno(id_aluno: int, dados: AlunoEdicaoData, authorization: str = Header(None)):
+    # Valida header Bearer
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token ausente")
+
+    token = authorization.split(" ", 1)[1]
+    ctx = get_contexto_usuario(token)
+
+    # Gerência (8+)
+    if ctx["nivel"] < 8:
+        raise HTTPException(status_code=403, detail="Acesso restrito à Gerência.")
+
+    try:
+        # Busca aluno (inclui email pra possível rollback)
+        aluno_resp = (
+            supabase.table("tb_alunos")
+            .select("id_aluno,id_unidade,user_id,email")
+            .eq("id_aluno", id_aluno)
+            .single()
+            .execute()
+        )
+
+        if not aluno_resp.data:
+            raise HTTPException(status_code=404, detail="Aluno não encontrado.")
+
+        aluno = aluno_resp.data
+
+        # Se não for nível 9+, só edita aluno da própria unidade
+        if ctx["nivel"] < 9 and aluno.get("id_unidade") != ctx["id_unidade"]:
+            raise HTTPException(status_code=403, detail="Sem permissão para editar aluno de outra unidade.")
+
+        updates = {}
+
+        if getattr(dados, "nome", None):
+            updates["nome_completo"] = dados.nome.upper()
+
+        if getattr(dados, "cpf", None):
+            updates["cpf"] = dados.cpf
+
+        if getattr(dados, "celular", None):
+            updates["celular"] = dados.celular
+
+        if getattr(dados, "telefone", None):
+            updates["telefone"] = dados.telefone
+
+        # ✅ Email: versão MAIS SEGURA
+        # - atualiza o Auth SEM auto-confirmar
+        # - depois atualiza tb_alunos
+        # - se tb_alunos falhar, tenta reverter o Auth pro email anterior (se houver)
+        novo_email = getattr(dados, "email", None)
+        if novo_email:
+            novo_email = novo_email.strip().lower()
+
+            user_id = aluno.get("user_id")
+            if not user_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Aluno não possui login (user_id). Use 'Criar Login do Aluno' antes de alterar o e-mail."
+                )
+
+            email_anterior_db = (aluno.get("email") or "").strip().lower() or None
+
+            # 1) Atualiza email do Auth (SEM email_confirm)
+            # Isso pode disparar fluxo de confirmação dependendo das configs do Supabase Auth.
+            supabase.auth.admin.update_user_by_id(str(user_id), {"email": novo_email})
+
+            # 2) Atualiza tb_alunos
+            try:
+                updates["email"] = novo_email
+                supabase.table("tb_alunos").update(updates).eq("id_aluno", id_aluno).execute()
+                # remove do updates pra não re-updar duas vezes abaixo
+                updates.pop("email", None)
+            except Exception as e_db:
+                # 3) rollback do Auth (melhor esforço)
+                if email_anterior_db:
+                    try:
+                        supabase.auth.admin.update_user_by_id(str(user_id), {"email": email_anterior_db})
+                    except Exception:
+                        pass
+                raise HTTPException(status_code=400, detail=f"Erro ao salvar e-mail no aluno: {str(e_db)}")
+
+        # Atualiza tb_alunos (demais campos)
+        if updates:
+            supabase.table("tb_alunos").update(updates).eq("id_aluno", id_aluno).execute()
+
+        # Atualiza turma na matrícula (se vier turma_codigo)
+        turma_codigo = getattr(dados, "turma_codigo", None)
+        if turma_codigo:
+            # tb_matriculas não tem created_at no seu caso -> usa id_matricula
+            mats = (
+                supabase.table("tb_matriculas")
+                .select("id_matricula")
+                .eq("id_aluno", id_aluno)
+                .order("id_matricula", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+            if mats.data:
+                supabase.table("tb_matriculas").update({"codigo_turma": turma_codigo}).eq(
+                    "id_matricula", mats.data[0]["id_matricula"]
+                ).execute()
+            else:
+                supabase.table("tb_matriculas").insert({
+                    "id_aluno": id_aluno,
+                    "codigo_turma": turma_codigo,
+                    "id_vendedor": ctx["id_colaborador"],
+                    "status_financeiro": "Ok"
+                }).execute()
+
+        return {"message": "Aluno atualizado!"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao atualizar aluno: {str(e)}")
+
+
+# 7. SISTEMA DE CHAMADA
+
+@router.get("/chamada/turma/{codigo_turma}")
+def listar_alunos_chamada(codigo_turma: str, authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    try:
+        # Busca alunos matriculados na turma específica
+        resp = supabase.table("tb_matriculas")\
+            .select("id_aluno, tb_alunos(nome_completo)")\
+            .eq("codigo_turma", codigo_turma)\
+            .execute()
+        return resp.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chamada/salvar")
+def salvar_chamada(dados: list, authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+    try:
+        # Os dados devem vir como uma lista de objetos: [{id_aluno, codigo_turma, presenca}]
+        for item in dados:
+            item['id_professor'] = ctx['id_colaborador']
+            item['data_aula'] = datetime.now().strftime("%Y-%m-%d")
+            
+        supabase.table("tb_chamadas").upsert(dados, on_conflict="id_aluno,codigo_turma,data_aula").execute()
+        return {"message": "Chamada realizada com sucesso!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+@router.get("/festas-aniversario")
+def listar_festas_aniversario(
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    data_ini: Optional[str] = None,     # YYYY-MM-DD
+    data_fim: Optional[str] = None,     # YYYY-MM-DD
+    id_vendedor: Optional[int] = None,
+    id_unidade: Optional[int] = None,
+    sort_by: str = "data_festa",
+    sort_dir: str = "asc",
+    authorization: str = Header(None)
+):
     if not authorization:
         raise HTTPException(status_code=401)
 
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
 
-    # Valida permissões (mesma lógica de admin_listar_alunos ou cadastrar-aluno)
-    if ctx['nivel'] < 8:  # ajuste conforme sua lógica de permissão
-        raise HTTPException(status_code=403, detail="Acesso restrito.")
+    # só 8/9/10
+    if ctx["nivel"] not in (8, 9, 10):
+        raise HTTPException(status_code=403, detail="Acesso restrito (nível 8/9/10).")
 
-    # Verifica se o aluno existe
-    aluno = supabase.table("tb_alunos").select("user_id").eq("id_aluno", dados.id_aluno).single().execute()
-    if not aluno.data:
-        raise HTTPException(status_code=404, detail="Aluno não encontrado.")
-    if aluno.data.get("user_id"):
-        raise HTTPException(status_code=400, detail="Aluno já possui login.")
+    # ✅ agora suporta ordenação por TODAS as colunas do cabeçalho
+    allowed_sort = {
+        "data_festa", "horario", "contratante", "telefone", "aniversariante",
+        "idade", "data_pagamento", "kit_festa", "valor",
+        "id_vendedor", "id_unidade", "status", "created_at"
+    }
+    if sort_by not in allowed_sort:
+        sort_by = "data_festa"
 
-    # Cria o usuário no Supabase Auth
+    desc = (sort_dir or "").lower() == "desc"
+
     try:
-        user_auth = supabase.auth.admin.create_user({
-            "email": dados.email,
-            "password": dados.senha,
-            "email_confirm": True
-        })
+        # joins via FK (suas constraints precisam ter esses nomes)
+        query = supabase.table("tb_festas_aniversario").select(
+            "*, tb_unidades!fk_festas_unidade(nome_unidade), tb_colaboradores!fk_festas_vendedor(nome_completo)"
+        )
+
+        if status:
+            query = query.eq("status", status)
+
+        if data_ini:
+            query = query.gte("data_festa", data_ini)
+
+        if data_fim:
+            query = query.lte("data_festa", data_fim)
+
+        if id_vendedor:
+            query = query.eq("id_vendedor", id_vendedor)
+
+        # unidade:
+        if ctx["nivel"] == 8:
+            query = query.eq("id_unidade", ctx["id_unidade"])
+        else:
+            if id_unidade:
+                query = query.eq("id_unidade", id_unidade)
+
+        if q:
+            query = query.or_(
+                f"contratante.ilike.%{q}%,aniversariante.ilike.%{q}%,telefone.ilike.%{q}%"
+            )
+
+        query = query.order(sort_by, desc=desc)
+
+        return query.execute().data
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao criar usuário: {str(e)}")
+        print("Erro listar festas:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
-    new_user_id = user_auth.user.id
+@router.get("/festas-aniversario/vendedores")
+def listar_vendedores_festas(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
 
-    # Atualiza a tabela tb_alunos com user_id e e-mail
-    supabase.table("tb_alunos").update({
-        "email": dados.email,
-        "user_id": new_user_id
-    }).eq("id_aluno", dados.id_aluno).execute()
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
 
-    return {"message": "Login criado com sucesso!"}
+    if ctx["nivel"] not in (8, 9, 10):
+        raise HTTPException(status_code=403, detail="Acesso restrito (nível 8/9/10).")
+
+    try:
+        q = supabase.table("tb_colaboradores").select("id_colaborador, nome_completo").eq("ativo", True)
+
+        # nível 8: só da unidade dele
+        if ctx["nivel"] == 8:
+            q = q.eq("id_unidade", ctx["id_unidade"])
+
+        # nível 9/10: pode ver todos (ou você pode filtrar depois por parâmetro se quiser)
+        q = q.order("nome_completo")
+
+        return q.execute().data
+    except Exception as e:
+        print("Erro vendedores:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/festas-aniversario")
+def criar_festa_aniversario(dados: FestaAniversarioCreate, authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    if ctx["nivel"] not in (8, 9, 10):
+        raise HTTPException(status_code=403, detail="Acesso restrito (nível 8/9/10).")
+
+    payload = dados.model_dump(exclude_none=True)
+
+    # unidade:
+    # nível 8: força unidade do contexto
+    if ctx["nivel"] == 8:
+        payload["id_unidade"] = ctx["id_unidade"]
+    else:
+        # se não veio, default Cuiabá (=1)
+        payload["id_unidade"] = payload.get("id_unidade") or 1
+
+    # tipo fixo
+    payload["tipo"] = "ANIVERSARIO_GAMER"
+
+    try:
+        resp = supabase.table("tb_festas_aniversario").insert(payload).execute()
+        return resp.data[0] if resp.data else {"message": "ok"}
+    except Exception as e:
+        print("Erro criar festa:", e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/festas-aniversario/{id_festa}")
+def editar_festa_aniversario(id_festa: int, dados: FestaAniversarioUpdate, authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    if ctx["nivel"] not in (8, 9, 10):
+        raise HTTPException(status_code=403, detail="Acesso restrito (nível 8/9/10).")
+
+    updates = dados.model_dump(exclude_none=True)
+
+    try:
+        # valida unidade quando nível 8
+        if ctx["nivel"] == 8:
+            festa = supabase.table("tb_festas_aniversario").select("id_unidade").eq("id", id_festa).single().execute()
+            if not festa.data:
+                raise HTTPException(status_code=404, detail="Festa não encontrada.")
+            if festa.data.get("id_unidade") != ctx["id_unidade"]:
+                raise HTTPException(status_code=403, detail="Sem permissão para editar festa de outra unidade.")
+
+            # garante que nível 8 não troca unidade
+            updates.pop("id_unidade", None)
+
+        supabase.table("tb_festas_aniversario").update(updates).eq("id", id_festa).execute()
+        return {"message": "Festa atualizada!"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("Erro editar festa:", e)
+        raise HTTPException(status_code=400, detail=str(e))
