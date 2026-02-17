@@ -51,14 +51,6 @@ if not url or not key:
 
 supabase: Client = create_client(url, key)
 
-# --- CREDENCIAIS Z-API ---
-ZAPI_INSTANCE_ID = os.getenv("ZAPI_INSTANCE_ID")
-ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
-
-if not ZAPI_INSTANCE_ID or not ZAPI_TOKEN:
-    raise ValueError("Verifique as variáveis ZAPI_INSTANCE_ID e ZAPI_TOKEN no ambiente.")
-
-ZAPI_BASE_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE_ID}/token/{ZAPI_TOKEN}/send-text"
 
 MAPA_CURSOS = {
     "GAME PRO": "game-pro",
@@ -69,19 +61,6 @@ MAPA_CURSOS = {
 # Incluir rotas administrativas
 app.include_router(admin_router)
 app.include_router(aluno_router)
-
-
-# --- FUNÇÕES AUXILIARES ---
-
-def enviar_mensagem_zapi(telefone_destino: str, mensagem_texto: str):
-    headers = {"Content-Type": "application/json"}
-    payload = {"phone": telefone_destino, "message": mensagem_texto}
-    try:
-        response = requests.post(ZAPI_BASE_URL, json=payload, headers=headers)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Erro Z-API: {e}")
-        return False
 
 
 # --- ROTAS PÚBLICAS ---
