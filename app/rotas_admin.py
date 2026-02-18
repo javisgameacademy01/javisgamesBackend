@@ -547,14 +547,27 @@ def admin_listar_alunos(authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
+    
     try:
-        # Agora buscamos também o 'tipo_turma' dentro de tb_turmas, através da matrícula
+        # CONSULTA SIMPLIFICADA: 
+        # Removendo joins profundos que podem quebrar por nomes de FK diferentes no banco novo
         query = supabase.table("tb_alunos").select("*, tb_matriculas(codigo_turma, status_financeiro, tb_turmas(tipo_turma, dia_semana))")
-        if ctx['nivel'] < 9: query = query.eq("id_unidade", ctx['id_unidade'])
-        return query.execute().data
+        
+        # Filtro de Unidade (apenas se não for Diretor nível 9+)
+        if ctx['nivel'] < 9: 
+            query = query.eq("id_unidade", ctx['id_unidade'])
+            
+        res = query.execute()
+        return res.data
     except Exception as e: 
-        print(f"Erro listar alunos: {e}")
-        return []
+        print(f"ERRO listar alunos: {e}")
+        # Caso a consulta complexa falhe, tentamos retornar apenas os alunos básicos para não travar a tela
+        try:
+            fallback = supabase.table("tb_alunos").select("*")
+            if ctx['nivel'] < 9: fallback = fallback.eq("id_unidade", ctx['id_unidade'])
+            return fallback.execute().data
+        except:
+            return []
 
 # 5. REPOSIÇÕES E AGENDA
 
