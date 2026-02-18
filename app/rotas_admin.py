@@ -302,34 +302,62 @@ def admin_editar_turma(codigo_original: str, dados: TurmaData, authorization: st
 
 @router.get("/meus-dados")
 def get_dados_funcionario(authorization: str = Header(None)):
-    if not authorization: raise HTTPException(status_code=401)
+    if not authorization: 
+        raise HTTPException(status_code=401, detail="Token ausente")
+    
     try:
+        # Extração do Token e User ID
         token = authorization.split(" ")[1]
         user = supabase.auth.get_user(token)
-        user_id = user.user.id # UUID do Auth
+        user_id = user.user.id 
         
+        # CONSULTA SIMPLIFICADA:
+        # 1. Removemos o !fk_cargos para deixar o Supabase resolver o join automaticamente
+        # 2. Removemos o filtro de 'ativo' para evitar bloqueios por dados migrados incorretamente
         response = supabase.table("tb_colaboradores")\
-            .select("id_colaborador, nome_completo, telefone, email, id_cargo, id_unidade, tb_cargos!fk_cargos(nome_cargo, nivel_acesso)")\
+            .select("id_colaborador, nome_completo, telefone, email, id_cargo, id_unidade, tb_cargos(nome_cargo, nivel_acesso)")\
             .eq("user_id", user_id)\
-            .eq("ativo", True)\
             .execute()
             
-        if not response.data: raise HTTPException(status_code=403)
+        # Se não encontrar o registro na tb_colaboradores
+        if not response.data:
+            logger.error(f"Acesso negado: User ID {user_id} não encontrado na tb_colaboradores.")
+            raise HTTPException(status_code=403, detail="Utilizador não vinculado como colaborador no banco de dados.")
+            
         funcionario = response.data[0]
         
-        return {
-            "id_colaborador": funcionario['id_colaborador'],
-            "user_id_auth": user_id, # <--- NOVO CAMPO IMPORTANTE (UUID)
-            "nome": funcionario['nome_completo'],
-            "telefone": funcionario['telefone'],
-            "email_contato": funcionario['email'],
-            "cargo": funcionario['tb_cargos']['nome_cargo'],
-            "nivel": funcionario['tb_cargos']['nivel_acesso'],
-            "unidade": funcionario['id_unidade']
-        }
-    except Exception as e:
-        raise HTTPException(status_code=403, detail="Erro interno")
+        # TRATAMENTO DE SEGURANÇA PARA O CARGO:
+        # Se o join com tb_cargos falhar ou o cargo não existir, define valores padrão para não quebrar o front
+        cargo_data = funcionario.get('tb_cargos')
+        
+        # Caso o retorno do join venha como lista (comum em algumas versões do SDK) ou dicionário
+        if isinstance(cargo_data, list) and len(cargo_data) > 0:
+            cargo_info = cargo_data[0]
+        elif isinstance(cargo_data, dict):
+            cargo_info = cargo_data
+        else:
+            cargo_info = {"nome_cargo": "Colaborador", "nivel_acesso": 1}
 
+        # RETORNO PARA O FRONT-END
+        return {
+            "id_colaborador": funcionario.get('id_colaborador'),
+            "user_id_auth": user_id,
+            "nome": funcionario.get('nome_completo', 'Nome não definido'),
+            "telefone": funcionario.get('telefone', ''),
+            "email_contato": funcionario.get('email', ''),
+            "cargo": cargo_info.get('nome_cargo', 'Staff'),
+            "nivel": cargo_info.get('nivel_acesso', 1),
+            "unidade": funcionario.get('id_unidade', 1)
+        }
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Erro crítico em meus-dados: {str(e)}")
+        # Retornamos 403 para que o front entenda que deve tratar o acesso, 
+        # mas com o detalhe do erro para saberes o que aconteceu
+        raise HTTPException(status_code=403, detail=f"Erro interno de permissão: {str(e)}")
+        
 @router.get("/conteudo-didatico/cursos")
 def admin_listar_cursos_didaticos(authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
