@@ -551,35 +551,34 @@ def admin_listar_alunos(authorization: str = Header(None)):
     ctx = get_contexto_usuario(token)
     
     try:
-        # CONSULTA CORRIGIDA:
-        # 1. Mapeamos 'email:email_aluno' para que o Python entregue o campo como 'email' ao Frontend
-        # 2. Mantemos os joins com tabelas relacionadas para exibir Turma e Status
+        # 1. Voltamos para o select "*" simples que você sabe que funciona
+        # 2. Mantemos os joins, mas sem tentar renomear colunas dentro da query
         query = supabase.table("tb_alunos").select(
-            "*, email:email_aluno, tb_matriculas(id_matricula, codigo_turma, status_financeiro, "
-            "tb_turmas(tipo_turma, dia_semana))"
+            "*, tb_matriculas(id_matricula, codigo_turma, status_financeiro, tb_turmas(tipo_turma, dia_semana))"
         )
         
-        # Filtro de Unidade: Aplicado apenas se não for Diretor (nível 9+)
+        # Filtro de Unidade
         if ctx['nivel'] < 9: 
             query = query.eq("id_unidade", ctx['id_unidade'])
             
         res = query.execute()
-        return res.data
+        
+        # TRATAMENTO DE DADOS NO PYTHON (Mais seguro que no SQL)
+        # Aqui garantimos que se o campo for 'email_aluno', ele também seja entregue como 'email'
+        dados = res.data
+        for aluno in dados:
+            if 'email_aluno' in aluno and not aluno.get('email'):
+                aluno['email'] = aluno['email_aluno']
+        
+        return dados
 
     except Exception as e: 
-        logger.error(f"Erro na consulta complexa de alunos: {e}")
-        
-        # FALLBACK: Se a consulta acima falhar por erro de relação/join, 
-        # tenta trazer pelo menos os dados básicos dos alunos para não travar a tela
+        logger.error(f"Erro ao listar alunos: {e}")
+        # Fallback total para não travar o front
         try:
-            fallback = supabase.table("tb_alunos").select("*, email:email_aluno")
-            if ctx['nivel'] < 9: 
-                fallback = fallback.eq("id_unidade", ctx['id_unidade'])
-            
-            res_fallback = fallback.execute()
+            res_fallback = supabase.table("tb_alunos").select("*").execute()
             return res_fallback.data
-        except Exception as e2:
-            logger.error(f"Erro no fallback de alunos: {e2}")
+        except:
             return []
 
 # 5. REPOSIÇÕES E AGENDA
