@@ -129,6 +129,232 @@ def get_contexto_usuario(token: str):
 
 # --- ROTAS ---
 # As rotas serão adicionadas abaixo
+# =========================================
+# AULAS EXPERIMENTAIS
+# Tabela: tb_aulas_experimentais
+# Colunas (como você pediu):
+# ID, RESPONSÁVEL, CONTATO1, CONTATO2, ALUNO(A),
+# DATA DA AULA, HORÁRIO, CURSO, ORIGEM, VENDEDOR (FK),
+# STATUS DE ATENDIMENTO, OBSERVAÇÃO, DATACRIAÇÃO
+# =========================================
+
+class AulaExperimentalCreate(BaseModel):
+    responsavel: Optional[str] = None
+    contato1: Optional[str] = None
+    contato2: Optional[str] = None
+    aluno: str
+    data_aula: str  # "YYYY-MM-DD"
+    horario: Optional[str] = None
+    curso: Optional[str] = None
+    origem: Optional[str] = None
+    id_vendedor: Optional[int] = None  # FK tb_colaboradores.id_colaborador
+    status_atendimento: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+class AulaExperimentalUpdate(BaseModel):
+    responsavel: Optional[str] = None
+    contato1: Optional[str] = None
+    contato2: Optional[str] = None
+    aluno: Optional[str] = None
+    data_aula: Optional[str] = None
+    horario: Optional[str] = None
+    curso: Optional[str] = None
+    origem: Optional[str] = None
+    id_vendedor: Optional[int] = None
+    status_atendimento: Optional[str] = None
+    observacao: Optional[str] = None
+
+
+def _pode_editar_aula_experimental(ctx: dict) -> bool:
+    """
+    Você pediu: vendedor OU gerente pode marcar.
+    No seu sistema: gerente é nivel 8+.
+    Vendedor, pelo seu código, costuma ser nivel 3.
+    """
+    return (ctx.get("nivel") in [3] or ctx.get("nivel", 0) >= 8)
+
+
+@router.get("/aulas-experimentais")
+def listar_aulas_experimentais(
+    q: Optional[str] = None,
+    data: Optional[str] = None,  # YYYY-MM-DD (opcional)
+    authorization: str = Header(None)
+):
+    """
+    TODOS podem ver (qualquer usuário autenticado que passe pelo get_contexto_usuario).
+    - Filtra por unidade quando nivel < 9 (mesmo padrão do resto do sistema)
+    - Busca por texto (q) em aluno, responsavel, contatos, curso, origem, status_atendimento, observacao
+    """
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    try:
+        # Join para trazer nome do vendedor
+        query = supabase.table("tb_aulas_experimentais").select(
+            "id, responsavel, contato1, contato2, aluno, data_aula, horario, curso, origem, "
+            "id_vendedor, status_atendimento, observacao, created_at, "
+            "tb_colaboradores(nome_completo)"
+        )
+
+        # Se você quiser amarrar por unidade aqui futuramente, adicione id_unidade na tabela.
+        # Por enquanto seguimos seu padrão geral do sistema (sem unidade no schema final da tabela).
+
+        if data:
+            query = query.eq("data_aula", data)
+
+        if q:
+            qq = q.strip()
+            # OR com ilike em várias colunas
+            # OBS: sintaxe do PostgREST via supabase-py
+            query = query.or_(
+                f"aluno.ilike.%{qq}%,"
+                f"responsavel.ilike.%{qq}%,"
+                f"contato1.ilike.%{qq}%,"
+                f"contato2.ilike.%{qq}%,"
+                f"curso.ilike.%{qq}%,"
+                f"origem.ilike.%{qq}%,"
+                f"status_atendimento.ilike.%{qq}%,"
+                f"observacao.ilike.%{qq}%"
+            )
+
+        # Ordena mais recentes primeiro
+        query = query.order("data_aula", desc=True).order("created_at", desc=True)
+
+        rows = query.execute().data or []
+
+        # Normaliza vendedor_nome pro front (se quiser usar direto)
+        out = []
+        for r in rows:
+            vendedor_nome = "-"
+            if r.get("tb_colaboradores"):
+                # pode vir dict ou lista dependendo do SDK/relacionamento
+                if isinstance(r["tb_colaboradores"], dict):
+                    vendedor_nome = r["tb_colaboradores"].get("nome_completo") or "-"
+                elif isinstance(r["tb_colaboradores"], list) and len(r["tb_colaboradores"]) > 0:
+                    vendedor_nome = r["tb_colaboradores"][0].get("nome_completo") or "-"
+
+            out.append({
+                "id": r.get("id"),
+                "responsavel": r.get("responsavel"),
+                "contato1": r.get("contato1"),
+                "contato2": r.get("contato2"),
+                "aluno": r.get("aluno"),
+                "data_aula": r.get("data_aula"),
+                "horario": r.get("horario"),
+                "curso": r.get("curso"),
+                "origem": r.get("origem"),
+                "id_vendedor": r.get("id_vendedor"),
+                "vendedor_nome": vendedor_nome,
+                "status_atendimento": r.get("status_atendimento"),
+                "observacao": r.get("observacao"),
+                "created_at": r.get("created_at"),
+            })
+
+        return out
+
+    except Exception as e:
+        print(f"Erro listar aulas experimentais: {e}")
+        return []
+
+
+@router.post("/aulas-experimentais")
+def criar_aula_experimental(dados: AulaExperimentalCreate, authorization: str = Header(None)):
+    """
+    Só VENDEDOR (nivel 3) ou GERÊNCIA (8+) pode criar
+    """
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    if not _pode_editar_aula_experimental(ctx):
+        raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
+
+    try:
+        payload = dados.model_dump(exclude_none=True)
+
+        # default vendedor: quem está criando (se não veio no payload)
+        if not payload.get("id_vendedor"):
+            payload["id_vendedor"] = ctx["id_colaborador"]
+
+        # normalizações
+        if payload.get("aluno"):
+            payload["aluno"] = payload["aluno"].strip().upper()
+
+        if payload.get("responsavel"):
+            payload["responsavel"] = payload["responsavel"].strip().upper()
+
+        resp = supabase.table("tb_aulas_experimentais").insert(payload).execute()
+        if not resp.data:
+            raise Exception("Falha ao inserir aula experimental.")
+
+        return resp.data[0]
+
+    except Exception as e:
+        print(f"Erro criar aula experimental: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/aulas-experimentais/{id_aula}")
+def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, authorization: str = Header(None)):
+    """
+    Só VENDEDOR (nivel 3) ou GERÊNCIA (8+) pode editar
+    """
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    if not _pode_editar_aula_experimental(ctx):
+        raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
+
+    try:
+        updates = dados.model_dump(exclude_none=True)
+
+        if not updates:
+            return {"message": "Nada para atualizar."}
+
+        # normalizações
+        if "aluno" in updates and updates["aluno"]:
+            updates["aluno"] = updates["aluno"].strip().upper()
+        if "responsavel" in updates and updates["responsavel"]:
+            updates["responsavel"] = updates["responsavel"].strip().upper()
+
+        supabase.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
+        return {"message": "Atualizado!"}
+
+    except Exception as e:
+        print(f"Erro editar aula experimental: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/aulas-experimentais/{id_aula}")
+def deletar_aula_experimental(id_aula: str, authorization: str = Header(None)):
+    """
+    Só VENDEDOR (nivel 3) ou GERÊNCIA (8+) pode excluir
+    """
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    if not _pode_editar_aula_experimental(ctx):
+        raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
+
+    try:
+        supabase.table("tb_aulas_experimentais").delete().eq("id", id_aula).execute()
+        return {"message": "Excluído!"}
+
+    except Exception as e:
+        print(f"Erro deletar aula experimental: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # === ROTAS ADMINISTRATIVAS ===
