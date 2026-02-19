@@ -188,31 +188,38 @@ def listar_aulas_experimentais(
     ctx = get_contexto_usuario(token)
 
     try:
-        # Usamos o cliente 'supabase' global já configurado no seu arquivo
+        # Usamos o objeto 'supabase' global definido no seu arquivo
         query = supabase.table("tb_aulas_experimentais").select(
             "*, tb_colaboradores(nome_completo)"
         )
 
-        # Filtro de unidade para coordenadores/vendedores (Nível < 9)
+        # Filtro de Unidade: Se nível < 9, vê apenas a sua unidade
         if ctx['nivel'] < 9:
-            # Certifique-se que a coluna id_unidade existe na tb_aulas_experimentais
-            # Se não existir, use o id_vendedor para filtrar os da unidade
             query = query.eq("id_unidade", ctx['id_unidade'])
 
         if data:
             query = query.eq("data_aula", data)
 
         if q:
-            qq = f"%{q.strip()}%"
-            query = query.or_(f"aluno.ilike.{qq},responsavel.ilike.{qq},curso.ilike.{qq}")
+            term = f"%{q.strip()}%"
+            query = query.or_(f"aluno.ilike.{term},responsavel.ilike.{term},curso.ilike.{term}")
 
-        rows = query.order("data_aula", desc=True).execute()
-        return rows.data or []
+        query = query.order("data_aula", desc=True)
+        resp = query.execute()
+        
+        # Tratamento do nome do vendedor para o front
+        results = []
+        for r in (resp.data or []):
+            # Extrai o nome do join de forma segura
+            colab = r.get("tb_colaboradores")
+            r["vendedor_nome"] = colab.get("nome_completo") if colab else "Não atribuído"
+            results.append(r)
+            
+        return results
 
     except Exception as e:
-        logger.error(f"Erro ao listar aulas exp: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erro interno ao buscar dados no banco.")
-
+        print(f"ERRO CRÍTICO AULAS EXP: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno ao processar consulta no banco.")
 
 
 
