@@ -188,12 +188,12 @@ def listar_aulas_experimentais(
     ctx = get_contexto_usuario(token)
 
     try:
-        # Usamos o objeto 'supabase' global definido no seu arquivo
+        # Usamos o cliente 'supabase' global já definido
         query = supabase.table("tb_aulas_experimentais").select(
             "*, tb_colaboradores(nome_completo)"
         )
 
-        # Filtro de Unidade: Se nível < 9, vê apenas a sua unidade
+        # Filtro de unidade para Nível 8 (Coordenador)
         if ctx['nivel'] < 9:
             query = query.eq("id_unidade", ctx['id_unidade'])
 
@@ -201,25 +201,23 @@ def listar_aulas_experimentais(
             query = query.eq("data_aula", data)
 
         if q:
-            term = f"%{q.strip()}%"
-            query = query.or_(f"aluno.ilike.{term},responsavel.ilike.{term},curso.ilike.{term}")
+            termo = f"%{q.strip()}%"
+            query = query.or_(f"aluno.ilike.{termo},responsavel.ilike.{termo},curso.ilike.{termo}")
 
-        query = query.order("data_aula", desc=True)
-        resp = query.execute()
+        resp = query.order("data_aula", desc=True).execute()
         
-        # Tratamento do nome do vendedor para o front
-        results = []
+        # Formata o retorno para garantir que o front receba o 'vendedor_nome'
+        dados_formatados = []
         for r in (resp.data or []):
-            # Extrai o nome do join de forma segura
             colab = r.get("tb_colaboradores")
             r["vendedor_nome"] = colab.get("nome_completo") if colab else "Não atribuído"
-            results.append(r)
+            dados_formatados.append(r)
             
-        return results
+        return dados_formatados
 
     except Exception as e:
-        print(f"ERRO CRÍTICO AULAS EXP: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erro interno ao processar consulta no banco.")
+        print(f"Erro Aulas Exp: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno no banco de dados.")
 
 
 
