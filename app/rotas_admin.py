@@ -194,7 +194,8 @@ def listar_aulas_experimentais(
 
     try:
         # Join para trazer nome do vendedor
-        query = supabase.table("tb_aulas_experimentais").select(
+        db = supabase_authed(token)
+        query = db.table("tb_aulas_experimentais").select(
             "id, responsavel, contato1, contato2, aluno, data_aula, horario, curso, origem, "
             "id_vendedor, status_atendimento, observacao, created_at, "
             "tb_colaboradores(nome_completo)"
@@ -2071,3 +2072,14 @@ def listar_vendedores_aulas_experimentais(authorization: str = Header(None)):
         q = q.eq("id_unidade", ctx["id_unidade"])
 
     return q.order("nome_completo").execute().data
+
+def supabase_authed(token: str) -> Client:
+    """
+    Cria um client e aplica o JWT do usuário no PostgREST,
+    garantindo que RLS 'authenticated' funcione.
+    """
+    client = create_client(url, key)
+    # Supabase-py: aplica o token para as queries do PostgREST
+    client.postgrest.auth(token)
+    return client
+
