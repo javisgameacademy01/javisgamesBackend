@@ -1991,15 +1991,13 @@ def listar_vendedores_aulas_experimentais(authorization: str = Header(None)):
     if ctx["nivel"] != 3 and ctx["nivel"] < 8:
         raise HTTPException(status_code=403)
 
-    db = supabase_authed(token)
-
-    q = db.table("tb_colaboradores").select("id_colaborador,nome_completo").eq("ativo", True)
+    # Use o 'supabase' global em vez de db
+    q = supabase.table("tb_colaboradores").select("id_colaborador,nome_completo").eq("ativo", True)
 
     if ctx["nivel"] < 9:
         q = q.eq("id_unidade", ctx["id_unidade"])
 
     return q.order("nome_completo").execute().data or []
-
 
 def supabase_authed(token: str) -> Client:
     client = create_client(url, key)
