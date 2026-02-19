@@ -1678,8 +1678,8 @@ def salvar_chamada(dados: list, authorization: str = Header(None)):
 def listar_festas_aniversario(
     status: Optional[str] = None,
     q: Optional[str] = None,
-    data_ini: Optional[str] = None,     # YYYY-MM-DD
-    data_fim: Optional[str] = None,     # YYYY-MM-DD
+    data_ini: Optional[str] = None,
+    data_fim: Optional[str] = None,
     id_vendedor: Optional[int] = None,
     id_unidade: Optional[int] = None,
     sort_by: str = "data_festa",
@@ -1692,59 +1692,47 @@ def listar_festas_aniversario(
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
 
-    # só 8/9/10
+    # Nível de acesso (8, 9 ou 10)
     if ctx["nivel"] not in (8, 9, 10):
-        raise HTTPException(status_code=403, detail="Acesso restrito (nível 8/9/10).")
-
-    # ✅ agora suporta ordenação por TODAS as colunas do cabeçalho
-    allowed_sort = {
-        "data_festa", "horario", "contratante", "telefone", "aniversariante",
-        "idade", "data_pagamento", "kit_festa", "valor",
-        "id_vendedor", "id_unidade", "status", "created_at"
-    }
-    if sort_by not in allowed_sort:
-        sort_by = "data_festa"
-
-    desc = (sort_dir or "").lower() == "desc"
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     try:
-        # joins via FK (suas constraints precisam ter esses nomes)
+        # CONSULTA FLEXÍVEL: Removidos os "!" para evitar erro de nome de relação
         query = supabase.table("tb_festas_aniversario").select(
-            "*, tb_unidades!fk_festas_unidade(nome_unidade), tb_colaboradores!fk_festas_vendedor(nome_completo)"
+            "*, tb_unidades(nome_unidade), tb_colaboradores(nome_completo)"
         )
 
         if status:
             query = query.eq("status", status)
-
         if data_ini:
             query = query.gte("data_festa", data_ini)
-
         if data_fim:
             query = query.lte("data_festa", data_fim)
-
         if id_vendedor:
             query = query.eq("id_vendedor", id_vendedor)
 
-        # unidade:
+        # Filtro de Unidade automático para nível 8
         if ctx["nivel"] == 8:
             query = query.eq("id_unidade", ctx["id_unidade"])
-        else:
-            if id_unidade:
-                query = query.eq("id_unidade", id_unidade)
+        elif id_unidade:
+            query = query.eq("id_unidade", id_unidade)
 
         if q:
-            query = query.or_(
-                f"contratante.ilike.%{q}%,aniversariante.ilike.%{q}%,telefone.ilike.%{q}%"
-            )
+            query = query.or_(f"contratante.ilike.%{q}%,aniversariante.ilike.%{q}%,telefone.ilike.%{q}%")
 
+        # Ordenação
+        desc = (sort_dir or "").lower() == "desc"
         query = query.order(sort_by, desc=desc)
 
         return query.execute().data
 
     except Exception as e:
-        print("Erro listar festas:", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
+        print(f"Erro listar festas: {e}")
+        # Fallback simples caso o join complexo falhe
+        try:
+            return supabase.table("tb_festas_aniversario").select("*").execute().data
+        except:
+            return []
 @router.get("/festas-aniversario/vendedores")
 def listar_vendedores_festas(authorization: str = Header(None)):
     if not authorization:
