@@ -2059,19 +2059,15 @@ def listar_vendedores_aulas_experimentais(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
 
-    # vendedor (3) ou gerência (8+) pode ver
-    if ctx["nivel"] not in [3] and ctx["nivel"] < 8:
+    # vendedor (3) ou gerência (8+)
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8:
         raise HTTPException(status_code=403, detail="Acesso restrito.")
 
-    try:
-        q = supabase.table("tb_colaboradores").select("id_colaborador, nome_completo, id_unidade, ativo").eq("ativo", True)
+    q = supabase.table("tb_colaboradores")\
+        .select("id_colaborador, nome_completo, id_unidade")\
+        .eq("ativo", True)
 
-        # se não for diretoria, limita na unidade
-        if ctx["nivel"] < 9:
-            q = q.eq("id_unidade", ctx["id_unidade"])
+    if ctx["nivel"] < 9:
+        q = q.eq("id_unidade", ctx["id_unidade"])
 
-        q = q.order("nome_completo")
-        return q.execute().data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    return q.order("nome_completo").execute().data
