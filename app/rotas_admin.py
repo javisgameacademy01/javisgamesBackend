@@ -175,6 +175,10 @@ def _pode_editar_aula_experimental(ctx: dict) -> bool:
     return (ctx.get("nivel") in [3] or ctx.get("nivel", 0) >= 8)
 
 
+# =========================================
+# AULAS EXPERIMENTAIS CORRIGIDAS
+# =========================================
+
 @router.get("/aulas-experimentais")
 def listar_aulas_experimentais(
     q: Optional[str] = None,
@@ -188,7 +192,7 @@ def listar_aulas_experimentais(
     ctx = get_contexto_usuario(token)
 
     try:
-        # Usamos o cliente 'supabase' global já definido
+        # Usamos sempre o 'supabase' global
         query = supabase.table("tb_aulas_experimentais").select(
             "*, tb_colaboradores(nome_completo)"
         )
@@ -206,7 +210,7 @@ def listar_aulas_experimentais(
 
         resp = query.order("data_aula", desc=True).execute()
         
-        # Formata o retorno para garantir que o front receba o 'vendedor_nome'
+        # Mapeamento para garantir que o front receba 'vendedor_nome' corretamente
         dados_formatados = []
         for r in (resp.data or []):
             colab = r.get("tb_colaboradores")
@@ -216,16 +220,11 @@ def listar_aulas_experimentais(
         return dados_formatados
 
     except Exception as e:
-        print(f"Erro Aulas Exp: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erro interno no banco de dados.")
-
-
+        logger.error(f"Erro ao listar aulas exp: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno ao buscar dados.")
 
 @router.post("/aulas-experimentais")
 def criar_aula_experimental(dados: AulaExperimentalCreate, authorization: str = Header(None)):
-    """
-    Só VENDEDOR (nivel 3) ou GERÊNCIA (8+) pode criar
-    """
     if not authorization:
         raise HTTPException(status_code=401)
 
@@ -233,38 +232,24 @@ def criar_aula_experimental(dados: AulaExperimentalCreate, authorization: str = 
     ctx = get_contexto_usuario(token)
 
     if not _pode_editar_aula_experimental(ctx):
-        raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     try:
         payload = dados.model_dump(exclude_none=True)
-
-        # default vendedor: quem está criando (se não veio no payload)
         if not payload.get("id_vendedor"):
             payload["id_vendedor"] = ctx["id_colaborador"]
+        
+        # IMPORTANTE: Garante que a unidade seja a do coordenador
+        payload["id_unidade"] = ctx["id_unidade"]
 
-        # normalizações
-        if payload.get("aluno"):
-            payload["aluno"] = payload["aluno"].strip().upper()
-
-        if payload.get("responsavel"):
-            payload["responsavel"] = payload["responsavel"].strip().upper()
-
-        resp = db.table("tb_aulas_experimentais").insert(payload).execute()
-        if not resp.data:
-            raise Exception("Falha ao inserir aula experimental.")
-
-        return resp.data[0]
-
+        # Mudança de 'db' para 'supabase'
+        resp = supabase.table("tb_aulas_experimentais").insert(payload).execute()
+        return resp.data[0] if resp.data else {"message": "ok"}
     except Exception as e:
-        print(f"Erro criar aula experimental: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @router.patch("/aulas-experimentais/{id_aula}")
 def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, authorization: str = Header(None)):
-    """
-    Só VENDEDOR (nivel 3) ou GERÊNCIA (8+) pode editar
-    """
     if not authorization:
         raise HTTPException(status_code=401)
 
@@ -272,33 +257,18 @@ def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, author
     ctx = get_contexto_usuario(token)
 
     if not _pode_editar_aula_experimental(ctx):
-        raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     try:
         updates = dados.model_dump(exclude_none=True)
-
-        if not updates:
-            return {"message": "Nada para atualizar."}
-
-        # normalizações
-        if "aluno" in updates and updates["aluno"]:
-            updates["aluno"] = updates["aluno"].strip().upper()
-        if "responsavel" in updates and updates["responsavel"]:
-            updates["responsavel"] = updates["responsavel"].strip().upper()
-
-        db.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
+        # Mudança de 'db' para 'supabase'
+        supabase.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
         return {"message": "Atualizado!"}
-
     except Exception as e:
-        print(f"Erro editar aula experimental: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @router.delete("/aulas-experimentais/{id_aula}")
 def deletar_aula_experimental(id_aula: str, authorization: str = Header(None)):
-    """
-    Só VENDEDOR (nivel 3) ou GERÊNCIA (8+) pode excluir
-    """
     if not authorization:
         raise HTTPException(status_code=401)
 
@@ -306,14 +276,13 @@ def deletar_aula_experimental(id_aula: str, authorization: str = Header(None)):
     ctx = get_contexto_usuario(token)
 
     if not _pode_editar_aula_experimental(ctx):
-        raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     try:
-        db.table("tb_aulas_experimentais").delete().eq("id", id_aula).execute()
+        # Mudança de 'db' para 'supabase'
+        supabase.table("tb_aulas_experimentais").delete().eq("id", id_aula).execute()
         return {"message": "Excluído!"}
-
     except Exception as e:
-        print(f"Erro deletar aula experimental: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
