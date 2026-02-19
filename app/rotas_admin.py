@@ -279,7 +279,7 @@ def criar_aula_experimental(dados: AulaExperimentalCreate, authorization: str = 
         if payload.get("responsavel"):
             payload["responsavel"] = payload["responsavel"].strip().upper()
 
-        resp = supabase.table("tb_aulas_experimentais").insert(payload).execute()
+        resp = db.table("tb_aulas_experimentais").insert(payload).execute()
         if not resp.data:
             raise Exception("Falha ao inserir aula experimental.")
 
@@ -316,7 +316,7 @@ def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, author
         if "responsavel" in updates and updates["responsavel"]:
             updates["responsavel"] = updates["responsavel"].strip().upper()
 
-        supabase.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
+        db.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
         return {"message": "Atualizado!"}
 
     except Exception as e:
@@ -339,7 +339,7 @@ def deletar_aula_experimental(id_aula: str, authorization: str = Header(None)):
         raise HTTPException(status_code=403, detail="Acesso restrito a Vendedor/Gerência.")
 
     try:
-        supabase.table("tb_aulas_experimentais").delete().eq("id", id_aula).execute()
+        db.table("tb_aulas_experimentais").delete().eq("id", id_aula).execute()
         return {"message": "Excluído!"}
 
     except Exception as e:
