@@ -187,66 +187,31 @@ def listar_aulas_experimentais(
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
 
-    # ✅ isso é o mais importante (RLS)
-    db = supabase_authed(token)
-
     try:
-        query = db.table("tb_aulas_experimentais").select(
-            "id,responsavel,contato1,contato2,aluno,data_aula,horario,curso,origem,"
-            "id_vendedor,status_atendimento,observacao,created_at,"
-            "tb_colaboradores(nome_completo)"
+        # Usamos o cliente 'supabase' global já configurado no seu arquivo
+        query = supabase.table("tb_aulas_experimentais").select(
+            "*, tb_colaboradores(nome_completo)"
         )
+
+        # Filtro de unidade para coordenadores/vendedores (Nível < 9)
+        if ctx['nivel'] < 9:
+            # Certifique-se que a coluna id_unidade existe na tb_aulas_experimentais
+            # Se não existir, use o id_vendedor para filtrar os da unidade
+            query = query.eq("id_unidade", ctx['id_unidade'])
 
         if data:
             query = query.eq("data_aula", data)
 
         if q:
-            qq = q.strip()
-            query = query.or_(
-                f"aluno.ilike.%{qq}%,"
-                f"responsavel.ilike.%{qq}%,"
-                f"contato1.ilike.%{qq}%,"
-                f"contato2.ilike.%{qq}%,"
-                f"curso.ilike.%{qq}%,"
-                f"origem.ilike.%{qq}%,"
-                f"status_atendimento.ilike.%{qq}%,"
-                f"observacao.ilike.%{qq}%"
-            )
+            qq = f"%{q.strip()}%"
+            query = query.or_(f"aluno.ilike.{qq},responsavel.ilike.{qq},curso.ilike.{qq}")
 
-        query = query.order("data_aula", desc=True).order("created_at", desc=True)
-        rows = query.execute().data or []
-
-        out = []
-        for r in rows:
-            vendedor_nome = "-"
-            tbcol = r.get("tb_colaboradores")
-            if isinstance(tbcol, dict):
-                vendedor_nome = tbcol.get("nome_completo") or "-"
-            elif isinstance(tbcol, list) and tbcol:
-                vendedor_nome = tbcol[0].get("nome_completo") or "-"
-
-            out.append({
-                "id": r.get("id"),
-                "responsavel": r.get("responsavel"),
-                "contato1": r.get("contato1"),
-                "contato2": r.get("contato2"),
-                "aluno": r.get("aluno"),
-                "data_aula": r.get("data_aula"),
-                "horario": r.get("horario"),
-                "curso": r.get("curso"),
-                "origem": r.get("origem"),
-                "id_vendedor": r.get("id_vendedor"),
-                "vendedor_nome": vendedor_nome,
-                "status_atendimento": r.get("status_atendimento"),
-                "observacao": r.get("observacao"),
-                "created_at": r.get("created_at"),
-            })
-
-        return out
+        rows = query.order("data_aula", desc=True).execute()
+        return rows.data or []
 
     except Exception as e:
-        # ✅ NÃO esconda o erro com return []
-        raise HTTPException(status_code=500, detail=f"Erro aulas-experimentais: {str(e)}")
+        logger.error(f"Erro ao listar aulas exp: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno ao buscar dados no banco.")
 
 
 
