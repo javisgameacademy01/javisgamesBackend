@@ -176,18 +176,25 @@ def _pode_editar_aula_experimental(ctx: dict) -> bool:
 
 
 @router.get("/aulas-experimentais")
-def listar_aulas_experimentais(q: Optional[str] = None, data: Optional[str] = None, authorization: str = Header(None)):
+def listar_aulas_experimentais(
+    q: Optional[str] = None,
+    data: Optional[str] = None,
+    authorization: str = Header(None)
+):
     if not authorization:
         raise HTTPException(status_code=401)
 
     token = authorization.split(" ")[1]
-    _ = get_contexto_usuario(token)  # valida token/usuário
+    ctx = get_contexto_usuario(token)
 
-    db = supabase_authed(token)      # ✅ IMPORTANTÍSSIMO para RLS
+    # ✅ isso é o mais importante (RLS)
+    db = supabase_authed(token)
 
     try:
         query = db.table("tb_aulas_experimentais").select(
-            "id,responsavel,contato1,contato2,aluno,data_aula,horario,curso,origem,id_vendedor,status_atendimento,observacao,created_at"
+            "id,responsavel,contato1,contato2,aluno,data_aula,horario,curso,origem,"
+            "id_vendedor,status_atendimento,observacao,created_at,"
+            "tb_colaboradores(nome_completo)"
         )
 
         if data:
@@ -207,10 +214,40 @@ def listar_aulas_experimentais(q: Optional[str] = None, data: Optional[str] = No
             )
 
         query = query.order("data_aula", desc=True).order("created_at", desc=True)
-        return query.execute().data or []
+        rows = query.execute().data or []
+
+        out = []
+        for r in rows:
+            vendedor_nome = "-"
+            tbcol = r.get("tb_colaboradores")
+            if isinstance(tbcol, dict):
+                vendedor_nome = tbcol.get("nome_completo") or "-"
+            elif isinstance(tbcol, list) and tbcol:
+                vendedor_nome = tbcol[0].get("nome_completo") or "-"
+
+            out.append({
+                "id": r.get("id"),
+                "responsavel": r.get("responsavel"),
+                "contato1": r.get("contato1"),
+                "contato2": r.get("contato2"),
+                "aluno": r.get("aluno"),
+                "data_aula": r.get("data_aula"),
+                "horario": r.get("horario"),
+                "curso": r.get("curso"),
+                "origem": r.get("origem"),
+                "id_vendedor": r.get("id_vendedor"),
+                "vendedor_nome": vendedor_nome,
+                "status_atendimento": r.get("status_atendimento"),
+                "observacao": r.get("observacao"),
+                "created_at": r.get("created_at"),
+            })
+
+        return out
 
     except Exception as e:
+        # ✅ NÃO esconda o erro com return []
         raise HTTPException(status_code=500, detail=f"Erro aulas-experimentais: {str(e)}")
+
 
 
 
@@ -2026,12 +2063,8 @@ def listar_vendedores_aulas_experimentais(authorization: str = Header(None)):
 
 
 def supabase_authed(token: str) -> Client:
-    """
-    Cria um client e aplica o JWT do usuário no PostgREST,
-    garantindo que RLS 'authenticated' funcione.
-    """
     client = create_client(url, key)
-    # Supabase-py: aplica o token para as queries do PostgREST
     client.postgrest.auth(token)
     return client
+
 
