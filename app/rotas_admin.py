@@ -176,41 +176,25 @@ def _pode_editar_aula_experimental(ctx: dict) -> bool:
 
 
 @router.get("/aulas-experimentais")
-def listar_aulas_experimentais(
-    q: Optional[str] = None,
-    data: Optional[str] = None,  # YYYY-MM-DD (opcional)
-    authorization: str = Header(None)
-):
-    """
-    TODOS podem ver (qualquer usuário autenticado que passe pelo get_contexto_usuario).
-    - Filtra por unidade quando nivel < 9 (mesmo padrão do resto do sistema)
-    - Busca por texto (q) em aluno, responsavel, contatos, curso, origem, status_atendimento, observacao
-    """
+def listar_aulas_experimentais(q: Optional[str] = None, data: Optional[str] = None, authorization: str = Header(None)):
     if not authorization:
         raise HTTPException(status_code=401)
 
     token = authorization.split(" ")[1]
-    ctx = get_contexto_usuario(token)
+    _ = get_contexto_usuario(token)  # valida token/usuário
+
+    db = supabase_authed(token)      # ✅ IMPORTANTÍSSIMO para RLS
 
     try:
-        # Join para trazer nome do vendedor
-        db = supabase_authed(token)
         query = db.table("tb_aulas_experimentais").select(
-            "id, responsavel, contato1, contato2, aluno, data_aula, horario, curso, origem, "
-            "id_vendedor, status_atendimento, observacao, created_at, "
-            "tb_colaboradores(nome_completo)"
+            "id,responsavel,contato1,contato2,aluno,data_aula,horario,curso,origem,id_vendedor,status_atendimento,observacao,created_at"
         )
-
-        # Se você quiser amarrar por unidade aqui futuramente, adicione id_unidade na tabela.
-        # Por enquanto seguimos seu padrão geral do sistema (sem unidade no schema final da tabela).
 
         if data:
             query = query.eq("data_aula", data)
 
         if q:
             qq = q.strip()
-            # OR com ilike em várias colunas
-            # OBS: sintaxe do PostgREST via supabase-py
             query = query.or_(
                 f"aluno.ilike.%{qq}%,"
                 f"responsavel.ilike.%{qq}%,"
@@ -222,44 +206,12 @@ def listar_aulas_experimentais(
                 f"observacao.ilike.%{qq}%"
             )
 
-        # Ordena mais recentes primeiro
         query = query.order("data_aula", desc=True).order("created_at", desc=True)
-
-        rows = query.execute().data or []
-
-        # Normaliza vendedor_nome pro front (se quiser usar direto)
-        out = []
-        for r in rows:
-            vendedor_nome = "-"
-            if r.get("tb_colaboradores"):
-                # pode vir dict ou lista dependendo do SDK/relacionamento
-                if isinstance(r["tb_colaboradores"], dict):
-                    vendedor_nome = r["tb_colaboradores"].get("nome_completo") or "-"
-                elif isinstance(r["tb_colaboradores"], list) and len(r["tb_colaboradores"]) > 0:
-                    vendedor_nome = r["tb_colaboradores"][0].get("nome_completo") or "-"
-
-            out.append({
-                "id": r.get("id"),
-                "responsavel": r.get("responsavel"),
-                "contato1": r.get("contato1"),
-                "contato2": r.get("contato2"),
-                "aluno": r.get("aluno"),
-                "data_aula": r.get("data_aula"),
-                "horario": r.get("horario"),
-                "curso": r.get("curso"),
-                "origem": r.get("origem"),
-                "id_vendedor": r.get("id_vendedor"),
-                "vendedor_nome": vendedor_nome,
-                "status_atendimento": r.get("status_atendimento"),
-                "observacao": r.get("observacao"),
-                "created_at": r.get("created_at"),
-            })
-
-        return out
+        return query.execute().data or []
 
     except Exception as e:
-        print(f"Erro listar aulas experimentais: {e}")
-        return []
+        raise HTTPException(status_code=500, detail=f"Erro aulas-experimentais: {str(e)}")
+
 
 
 @router.post("/aulas-experimentais")
@@ -2060,18 +2012,18 @@ def listar_vendedores_aulas_experimentais(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
 
-    # vendedor (3) ou gerência (8+)
     if ctx["nivel"] != 3 and ctx["nivel"] < 8:
-        raise HTTPException(status_code=403, detail="Acesso restrito.")
+        raise HTTPException(status_code=403)
 
-    q = supabase.table("tb_colaboradores")\
-        .select("id_colaborador, nome_completo, id_unidade")\
-        .eq("ativo", True)
+    db = supabase_authed(token)
+
+    q = db.table("tb_colaboradores").select("id_colaborador,nome_completo").eq("ativo", True)
 
     if ctx["nivel"] < 9:
         q = q.eq("id_unidade", ctx["id_unidade"])
 
-    return q.order("nome_completo").execute().data
+    return q.order("nome_completo").execute().data or []
+
 
 def supabase_authed(token: str) -> Client:
     """
