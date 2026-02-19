@@ -192,12 +192,9 @@ def listar_aulas_experimentais(
     ctx = get_contexto_usuario(token)
 
     try:
-        # Usamos sempre o 'supabase' global
-        query = supabase.table("tb_aulas_experimentais").select(
-            "*, tb_colaboradores(nome_completo)"
-        )
+        query = supabase.table("tb_aulas_experimentais").select("*, tb_colaboradores(nome_completo)")
 
-        # Filtro de unidade para Nível 8 (Coordenador)
+        # Filtro de unidade para Nível 8
         if ctx['nivel'] < 9:
             query = query.eq("id_unidade", ctx['id_unidade'])
 
@@ -210,18 +207,28 @@ def listar_aulas_experimentais(
 
         resp = query.order("data_aula", desc=True).execute()
         
-        # Mapeamento para garantir que o front receba 'vendedor_nome' corretamente
         dados_formatados = []
         for r in (resp.data or []):
             colab = r.get("tb_colaboradores")
-            r["vendedor_nome"] = colab.get("nome_completo") if colab else "Não atribuído"
+            r["vendedor_nome"] = colab.get("nome_completo") if isinstance(colab, dict) else "Não atribuído"
             dados_formatados.append(r)
             
         return dados_formatados
 
     except Exception as e:
-        logger.error(f"Erro ao listar aulas exp: {str(e)}")
-        raise HTTPException(status_code=500, detail="Erro interno ao buscar dados.")
+        # CAPTURAMOS O ERRO REAL DO SUPABASE!
+        erro_banco = str(e)
+        logger.error(f"Erro Supabase: {erro_banco}")
+        
+        # Traduzimos o erro para você ver na tela o que precisa arrumar no banco:
+        if "id_unidade" in erro_banco:
+            raise HTTPException(status_code=500, detail="Falta a coluna 'id_unidade' na tabela tb_aulas_experimentais no Supabase.")
+        elif "tb_colaboradores" in erro_banco or "relationship" in erro_banco:
+            raise HTTPException(status_code=500, detail="Falta a Chave Estrangeira (Foreign Key) em 'id_vendedor' ligando a tb_colaboradores.")
+        elif "does not exist" in erro_banco and "tb_aulas_experimentais" in erro_banco:
+            raise HTTPException(status_code=500, detail="A tabela 'tb_aulas_experimentais' não existe no banco de dados.")
+            
+        raise HTTPException(status_code=500, detail=f"Erro no banco: {erro_banco}")
 
 @router.post("/aulas-experimentais")
 def criar_aula_experimental(dados: AulaExperimentalCreate, authorization: str = Header(None)):
