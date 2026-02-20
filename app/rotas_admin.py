@@ -2031,3 +2031,74 @@ def supabase_authed(token: str) -> Client:
     return client
 
 
+# =============================
+# Relatório de Faltas (por data / nº da aula)
+# =============================
+
+
+class RelatorioFaltasUpdate(BaseModel):
+    data_falta: Optional[str] = None  # YYYY-MM-DD
+    numero_aula: Optional[int] = None
+
+
+@router.get("/relatorio-faltas")
+def listar_relatorio_faltas(
+    turma: Optional[str] = None,
+    authorization: str = Header(None)
+):
+    """Lista linhas do relatório de faltas (para preenchimento manual)."""
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    try:
+        q = supabase.table("tb_relatorio_faltas").select("*")
+
+        # Escopo por unidade (mesma regra aplicada no restante do admin)
+        if ctx.get('nivel', 0) < 9 and ctx.get('id_unidade') is not None:
+            q = q.eq("id_unidade", ctx['id_unidade'])
+
+        if turma:
+            q = q.eq("turma", turma)
+
+        resp = q.order("turma", desc=False).order("nome", desc=False).execute()
+        return resp.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar relatório de faltas: {e}")
+
+
+@router.put("/relatorio-faltas/{id_relatorio}")
+def atualizar_relatorio_faltas(
+    id_relatorio: int,
+    payload: RelatorioFaltasUpdate,
+    authorization: str = Header(None)
+):
+    """Atualiza data_falta e/ou numero_aula de uma linha do relatório."""
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    data = payload.dict(exclude_unset=True)
+
+    # Normaliza string vazia -> null
+    if 'data_falta' in data and (data['data_falta'] is None or str(data['data_falta']).strip() == ""):
+        data['data_falta'] = None
+
+    try:
+        q = supabase.table("tb_relatorio_faltas").update(data).eq("id", id_relatorio)
+
+        if ctx.get('nivel', 0) < 9 and ctx.get('id_unidade') is not None:
+            q = q.eq("id_unidade", ctx['id_unidade'])
+
+        out = q.execute()
+        if not out.data:
+            raise HTTPException(status_code=404, detail="Linha não encontrada")
+        return {"success": True, "data": out.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar relatório de faltas: {e}")
