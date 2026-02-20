@@ -635,7 +635,8 @@ def admin_cadastrar_aluno(dados: NovoAlunoData, authorization: str = Header(None
     ctx = get_contexto_usuario(token)
 
     # Permissão (alinha com seu front: menu-cadastro só aparece no 8+)
-    if ctx["nivel"] < 8:
+    # Permissão: Vendedor (3) e Gerência+ (8+)
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8:
         raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     new_user_id = None
@@ -1632,7 +1633,8 @@ def criar_login_aluno(dados: NovoUsuarioData, authorization: str = Header(None))
     token = authorization.split(" ", 1)[1]
     ctx = get_contexto_usuario(token)
 
-    if ctx["nivel"] < 8:
+    # Permissão: Vendedor (3) e Gerência+ (8+)
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8:
         raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     new_user_id = None
@@ -1641,12 +1643,15 @@ def criar_login_aluno(dados: NovoUsuarioData, authorization: str = Header(None))
         # Verifica se aluno existe e ainda não tem user_id
         try:
             aluno = supabase.table("tb_alunos")\
-                .select("id_aluno, user_id")\
+                .select("id_aluno, user_id, id_unidade")\
                 .eq("id_aluno", dados.id_aluno)\
                 .single()\
                 .execute()
         except Exception:
             aluno = None
+        # Se não for diretoria (9+) e o aluno não for da mesma unidade, bloqueia
+        if ctx["nivel"] < 9 and aluno.data.get("id_unidade") != ctx["id_unidade"]:
+            raise HTTPException(status_code=403, detail="Sem permissão para aluno de outra unidade.")
 
         if not aluno or not aluno.data:
             raise HTTPException(status_code=404, detail="Aluno não encontrado.")
@@ -1696,8 +1701,9 @@ def admin_editar_aluno(id_aluno: int, dados: AlunoEdicaoData, authorization: str
     ctx = get_contexto_usuario(token)
 
     # Gerência (8+)
-    if ctx["nivel"] < 8:
-        raise HTTPException(status_code=403, detail="Acesso restrito à Gerência.")
+    # Permissão: Vendedor (3) e Gerência+ (8+)
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8:
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
 
     try:
         # Busca aluno (inclui email pra possível rollback)
