@@ -264,6 +264,13 @@ def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, author
 
     if not _pode_editar_aula_experimental(ctx):
         raise HTTPException(status_code=403, detail="Acesso restrito.")
+        
+    registro = supabase.table("tb_aulas_experimentais").select("id_unidade").eq("id", id_aula).single().execute()
+    if not registro.data:
+        raise HTTPException(status_code=404, detail="Aula não encontrada.")
+    
+    if ctx["nivel"] < 9 and registro.data.get("id_unidade") != ctx["id_unidade"]:
+        raise HTTPException(status_code=403, detail="Sem permissão para outra unidade.")
 
     try:
         updates = dados.model_dump(exclude_none=True)
@@ -283,6 +290,13 @@ def deletar_aula_experimental(id_aula: str, authorization: str = Header(None)):
 
     if not _pode_editar_aula_experimental(ctx):
         raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+    registro = supabase.table("tb_aulas_experimentais").select("id_unidade").eq("id", id_aula).single().execute()
+    if not registro.data:
+        raise HTTPException(status_code=404, detail="Aula não encontrada.")
+    
+    if ctx["nivel"] < 9 and registro.data.get("id_unidade") != ctx["id_unidade"]:
+        raise HTTPException(status_code=403, detail="Sem permissão para outra unidade.")
 
     try:
         # Mudança de 'db' para 'supabase'
