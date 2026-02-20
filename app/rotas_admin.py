@@ -2046,7 +2046,12 @@ def listar_relatorio_faltas(
     turma: Optional[str] = None,
     authorization: str = Header(None)
 ):
-    """Lista linhas do relatório de faltas (para preenchimento manual)."""
+    """Lista linhas do relatório de faltas (para preenchimento manual).
+
+    Usa a tabela **tb_relatorio_faltas_aula** (não possui id_unidade).
+    Campos usados no front: matricula, aluno_nome, codigo_turma, data_falta,
+    numero_aula, qtd_faltas_total, ultima_falta, professor.
+    """
     if not authorization:
         raise HTTPException(status_code=401)
 
@@ -2054,16 +2059,14 @@ def listar_relatorio_faltas(
     ctx = get_contexto_usuario(token)
 
     try:
-        q = supabase.table("tb_relatorio_faltas").select("*")
-
-        # Escopo por unidade (mesma regra aplicada no restante do admin)
-        if ctx.get('nivel', 0) < 9 and ctx.get('id_unidade') is not None:
-            q = q.eq("id_unidade", ctx['id_unidade'])
+        q = supabase.table("tb_relatorio_faltas_aula").select(
+            "id,matricula,aluno_nome,codigo_turma,data_falta,numero_aula,qtd_faltas_total,ultima_falta,professor"
+        )
 
         if turma:
-            q = q.eq("turma", turma)
+            q = q.eq("codigo_turma", turma)
 
-        resp = q.order("turma", desc=False).order("nome", desc=False).execute()
+        resp = q.order("codigo_turma", desc=False).order("aluno_nome", desc=False).order("id", desc=False).execute()
         return resp.data or []
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao listar relatório de faltas: {e}")
@@ -2089,10 +2092,7 @@ def atualizar_relatorio_faltas(
         data['data_falta'] = None
 
     try:
-        q = supabase.table("tb_relatorio_faltas").update(data).eq("id", id_relatorio)
-
-        if ctx.get('nivel', 0) < 9 and ctx.get('id_unidade') is not None:
-            q = q.eq("id_unidade", ctx['id_unidade'])
+        q = supabase.table("tb_relatorio_faltas_aula").update(data).eq("id", id_relatorio)
 
         out = q.execute()
         if not out.data:
