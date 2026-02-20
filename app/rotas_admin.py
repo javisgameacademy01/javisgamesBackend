@@ -46,7 +46,9 @@ from app.modelos import (
     NovoUsuarioData
 
 )
-
+class RelatorioFaltasUpdate(BaseModel):
+    data_falta: Optional[str] = None  # Recebe "YYYY-MM-DD"
+    numero_aula: Optional[int] = None
 
 # Logger
 logger = logging.getLogger(__name__)
@@ -2046,11 +2048,8 @@ def listar_relatorio_faltas(
     turma: Optional[str] = None,
     authorization: str = Header(None)
 ):
-    """Lista linhas do relatório de faltas (para preenchimento manual).
-
-    Usa a tabela **tb_relatorio_faltas_aula** (não possui id_unidade).
-    Campos usados no front: matricula, aluno_nome, codigo_turma, data_falta,
-    numero_aula, qtd_faltas_total, ultima_falta, professor.
+    """
+    Lista as linhas do relatório de faltas filtradas por unidade e turma.
     """
     if not authorization:
         raise HTTPException(status_code=401)
@@ -2059,17 +2058,27 @@ def listar_relatorio_faltas(
     ctx = get_contexto_usuario(token)
 
     try:
-        q = supabase.table("tb_relatorio_faltas_aula").select(
-            "id,matricula,aluno_nome,codigo_turma,data_falta,numero_aula,qtd_faltas_total,ultima_falta,professor"
+        # Selecionamos exatamente as colunas solicitadas para a tabela
+        query = supabase.table("tb_relatorio_faltas_aula").select(
+            "id, matricula, aluno_nome, codigo_turma, data_falta, "
+            "numero_aula, qtd_faltas_total, ultima_falta, professor, id_unidade"
         )
 
-        if turma:
-            q = q.eq("codigo_turma", turma)
+        # Filtro de segurança por unidade (apenas nível 9+ vê tudo)
+        if ctx['nivel'] < 9:
+            query = query.eq("id_unidade", ctx['id_unidade'])
 
-        resp = q.order("codigo_turma", desc=False).order("aluno_nome", desc=False).order("id", desc=False).execute()
+        # Filtro opcional por código de turma vindo do front-end
+        if turma:
+            query = query.eq("codigo_turma", turma)
+
+        # Ordenação: Turmas juntas e alunos em ordem alfabética
+        resp = query.order("codigo_turma").order("aluno_nome").execute()
+        
         return resp.data or []
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao listar relatório de faltas: {e}")
+        logger.error(f"Erro ao listar faltas: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar dados de faltas.")
 
 
 @router.put("/relatorio-faltas/{id_relatorio}")
@@ -2078,27 +2087,29 @@ def atualizar_relatorio_faltas(
     payload: RelatorioFaltasUpdate,
     authorization: str = Header(None)
 ):
-    """Atualiza data_falta e/ou numero_aula de uma linha do relatório."""
+    """
+    Atualiza a data da falta e o número da aula de um registro específico.
+    """
     if not authorization:
         raise HTTPException(status_code=401)
 
-    token = authorization.split(" ")[1]
-    ctx = get_contexto_usuario(token)
+    # Transforma o modelo em dicionário removendo campos não enviados
+    dados_update = payload.model_dump(exclude_unset=True)
 
-    data = payload.dict(exclude_unset=True)
-
-    # Normaliza string vazia -> null
-    if 'data_falta' in data and (data['data_falta'] is None or str(data['data_falta']).strip() == ""):
-        data['data_falta'] = None
+    # Tratamento para garantir que strings vazias sejam tratadas como nulas no banco
+    if 'data_falta' in dados_update and not dados_update['data_falta']:
+        dados_update['data_falta'] = None
 
     try:
-        q = supabase.table("tb_relatorio_faltas_aula").update(data).eq("id", id_relatorio)
+        resp = supabase.table("tb_relatorio_faltas_aula")\
+            .update(dados_update)\
+            .eq("id", id_relatorio)\
+            .execute()
 
-        out = q.execute()
-        if not out.data:
-            raise HTTPException(status_code=404, detail="Linha não encontrada")
-        return {"success": True, "data": out.data[0]}
-    except HTTPException:
-        raise
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="Registro não encontrado.")
+
+        return {"success": True, "data": resp.data[0]}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao atualizar relatório de faltas: {e}")
+        logger.error(f"Erro ao atualizar linha de falta {id_relatorio}: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao salvar os dados.")
