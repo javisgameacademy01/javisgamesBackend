@@ -2,7 +2,7 @@
 Rotas administrativas do sistema
 """
 import os
-from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query
 from pydantic import BaseModel
 from supabase import create_client, Client
 from datetime import datetime, timedelta
