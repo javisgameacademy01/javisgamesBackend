@@ -80,6 +80,9 @@ MAPA_CURSOS = {
 
 # --- FUNÇÕES AUXILIARES ---
 
+def _pode_cadastrar_aluno(ctx: dict) -> bool:
+    return (ctx.get("nivel") == 3) or (ctx.get("nivel", 0) >= 8)
+
 def enviar_mensagem_zapi(telefone_destino: str, mensagem_texto: str):
     headers = {"Content-Type": "application/json"}
     payload = {"phone": telefone_destino, "message": mensagem_texto}
@@ -167,12 +170,8 @@ class AulaExperimentalUpdate(BaseModel):
 
 
 def _pode_editar_aula_experimental(ctx: dict) -> bool:
-    """
-    Você pediu: vendedor OU gerente pode marcar.
-    No seu sistema: gerente é nivel 8+.
-    Vendedor, pelo seu código, costuma ser nivel 3.
-    """
-    return (ctx.get("nivel") in [3] or ctx.get("nivel", 0) >= 1)
+    # Vendedor (3) e Coordenação/Gerência (>=8)
+    return (ctx.get("nivel") == 3) or (ctx.get("nivel", 0) >= 8)
 
 
 # =========================================
