@@ -172,7 +172,7 @@ def _pode_editar_aula_experimental(ctx: dict) -> bool:
     No seu sistema: gerente é nivel 8+.
     Vendedor, pelo seu código, costuma ser nivel 3.
     """
-    return (ctx.get("nivel") in [3] or ctx.get("nivel", 0) >= 8)
+    return (ctx.get("nivel") in [3] or ctx.get("nivel", 0) >= 8 and 3)
 
 
 # =========================================
