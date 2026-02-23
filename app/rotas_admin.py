@@ -2138,3 +2138,34 @@ def atualizar_falta(
             raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) ao gravar no banco.")
             
         raise HTTPException(status_code=500, detail=f"Erro interno: {erro_msg}")
+
+@router.post("/admin/relatorio-faltas")
+def cadastrar_falta_manual(
+    dados: dict,
+    authorization: str = Header(None)
+):
+    logger.info(f"Recebendo cadastro manual de falta: {dados}")
+
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
+    try:
+        token = authorization.split(" ")[1]
+        ctx = get_contexto_usuario(token) # Valida se é um professor/admin
+        
+        # Adiciona o nome do professor que está cadastrando se não vier no payload
+        if "professor" not in dados:
+            dados["professor"] = ctx.get("nome")
+
+        # Inserção no Supabase
+        resp = supabase.table("tb_relatorio_faltas_aula").insert(dados).execute()
+
+        logger.info(f"Falta cadastrada manualmente com sucesso para o aluno {dados.get('aluno_nome')}")
+        return {"status": "success", "data": resp.data}
+
+    except Exception as e:
+        logger.error(f"ERRO AO CADASTRAR FALTA MANUAL: {str(e)}")
+        # Se o erro de RLS persistir aqui, o logger vai avisar
+        if "permission" in str(e).lower():
+            raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) no banco ao inserir.")
+        raise HTTPException(status_code=500, detail=str(e))
