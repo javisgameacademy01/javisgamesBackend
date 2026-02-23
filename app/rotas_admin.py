@@ -2051,39 +2051,41 @@ def listar_relatorio_faltas(
     turma: Optional[str] = None,
     authorization: str = Header(None)
 ):
-    """
-    Busca dados da tabela tb_relatorio_faltas_aula formatados para a tabela do portal.
-    """
-    if not authorization:
-        raise HTTPException(status_code=401)
-
-    token = authorization.split(" ")[1]
-    ctx = get_contexto_usuario(token)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token de autorização ausente ou inválido")
 
     try:
-        # Seleção exata das colunas informadas por você
+        # 1. Extração segura do token
+        token = authorization.split(" ")[1]
+        ctx = get_contexto_usuario(token)
+
+        # 2. Query com strings concatenadas corretamente (sem vírgulas entre as aspas)
+        # Note que removi as vírgulas que separavam as linhas de texto
         query = supabase.table("tb_relatorio_faltas_aula").select(
             "id, created_at, id_aluno, matricula, aluno_nome, telefones_raw, "
             "codigo_turma, data_falta, numero_aula, fonte_tipo, fonte_id, "
             "falta_seq, qtd_faltas_total, ultima_falta, professor"
         )
 
-        # Filtro de turma (se enviado pelo front-end)
+        # 3. Filtros
         if turma:
             query = query.eq("codigo_turma", turma)
 
-        # Executa e ordena por turma e nome para facilitar a visualização
+        # 4. Ordenação e Execução
+        # Dica: SEMPRE coloque o .execute() no final da montagem da query
         resp = query.order("codigo_turma").order("aluno_nome").execute()
         
-        return resp.data or []
+        return resp.data if resp.data is not None else []
 
     except Exception as e:
         erro_msg = str(e)
         logger.error(f"Erro crítico em relatorio-faltas: {erro_msg}")
         
-        # Se o erro 500 for coluna inexistente, o log avisará qual é
-        if "column" in erro_msg:
-            raise HTTPException(status_code=500, detail=f"Erro de banco: Verifique se todas as colunas existem na tb_relatorio_faltas_aula. Detalhe: {erro_msg}")
+        if "column" in erro_msg.lower():
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Erro de banco: Coluna inexistente. Detalhe: {erro_msg}"
+            )
             
         raise HTTPException(status_code=500, detail="Erro interno ao processar relatório de faltas.")
 
