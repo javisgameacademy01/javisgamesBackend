@@ -2061,12 +2061,11 @@ def listar_relatorio_faltas(
 
         # 2. Query com strings concatenadas corretamente (sem vírgulas entre as aspas)
         # Note que removi as vírgulas que separavam as linhas de texto
-        query = supabase.table("tb_relatorio_faltas_aula").select(
-            "id, created_at, id_aluno, matricula, aluno_nome, telefones_raw, "
-            "codigo_turma, data_falta, numero_aula, fonte_tipo, fonte_id, "
-            "falta_seq, qtd_faltas_total, ultima_falta, professor"
-        )
-
+        query = supabase.table("tb_relatorio_faltas_aula").select("""
+            id, created_at, id_aluno, matricula, aluno_nome, telefones_raw, 
+            codigo_turma, data_falta, numero_aula, fonte_tipo, fonte_id, 
+            falta_seq, qtd_faltas_total, ultima_falta, professor
+        """)
         # 3. Filtros
         if turma:
             query = query.eq("codigo_turma", turma)
