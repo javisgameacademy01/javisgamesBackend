@@ -2046,47 +2046,61 @@ class RelatorioFaltasUpdate(BaseModel):
     numero_aula: Optional[int] = None
 
 
-@router.get("/relatorio-faltas")
+@router.get("/relatorio-faltas") # Certifique-se de ajustar para "/admin/relatorio-faltas" se necessário
 def listar_relatorio_faltas(
     turma: Optional[str] = None,
     authorization: str = Header(None)
 ):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Token de autorização ausente ou inválido")
+    # LOG 1: Verificar se o Header chegou
+    logger.info(f"Requisição recebida. Authorization Header: {authorization[:20] if authorization else 'VAZIO'}...")
+
+    if not authorization:
+        logger.warning("Erro: Header de autorização ausente.")
+        raise HTTPException(status_code=401, detail="Token de autorização ausente")
 
     try:
-        # 1. Extração segura do token
+        # LOG 2: Extração do Token
+        if " " not in authorization:
+            logger.error("Erro: Formato do Header inválido. Esperado 'Bearer <token>'.")
+            raise HTTPException(status_code=401, detail="Formato de Token inválido")
+            
         token = authorization.split(" ")[1]
+        
+        # LOG 3: Validar contexto do usuário
         ctx = get_contexto_usuario(token)
+        logger.info(f"Usuário autenticado com sucesso: {ctx.get('id_colaborador', 'ID Desconhecido')}")
 
-        # 2. Query com strings concatenadas corretamente (sem vírgulas entre as aspas)
-        # Note que removi as vírgulas que separavam as linhas de texto
+        # Montagem da Query
         query = supabase.table("tb_relatorio_faltas_aula").select("""
             id, created_at, id_aluno, matricula, aluno_nome, telefones_raw, 
             codigo_turma, data_falta, numero_aula, fonte_tipo, fonte_id, 
             falta_seq, qtd_faltas_total, ultima_falta, professor
         """)
-        # 3. Filtros
+
         if turma:
             query = query.eq("codigo_turma", turma)
 
-        # 4. Ordenação e Execução
-        # Dica: SEMPRE coloque o .execute() no final da montagem da query
+        # LOG 4: Execução no Supabase
         resp = query.order("codigo_turma").order("aluno_nome").execute()
         
-        return resp.data if resp.data is not None else []
+        # LOG 5: Verificar dados retornados
+        logger.info(f"Busca finalizada. Registros encontrados: {len(resp.data) if resp.data else 0}")
+        
+        return resp.data or []
 
     except Exception as e:
-        erro_msg = str(e)
-        logger.error(f"Erro crítico em relatorio-faltas: {erro_msg}")
+        # LOG DE ERRO CRÍTICO
+        # Aqui ele vai te dizer se o banco rejeitou por RLS ou se o token é inválido
+        erro_detalhado = str(e)
+        logger.error(f"FALHA NO RELATÓRIO: {erro_detalhado}")
+
+        if "JWT" in erro_detalhado or "invalid" in erro_detalhado.lower():
+            raise HTTPException(status_code=401, detail=f"Token Inválido ou Expirado: {erro_detalhado}")
         
-        if "column" in erro_msg.lower():
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Erro de banco: Coluna inexistente. Detalhe: {erro_msg}"
-            )
-            
-        raise HTTPException(status_code=500, detail="Erro interno ao processar relatório de faltas.")
+        if "permission" in erro_detalhado.lower():
+            raise HTTPException(status_code=403, detail="Erro de Permissão no Banco (RLS)")
+
+        raise HTTPException(status_code=500, detail="Erro interno ao processar relatório.")
 
 
 @router.put("/relatorio-faltas/{id_relatorio}")
