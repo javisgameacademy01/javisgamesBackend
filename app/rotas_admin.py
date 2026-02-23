@@ -1608,16 +1608,19 @@ def enviar_chat_turma(dados: MensagemGrupoData, authorization: str = Header(None
 
 @router.get("/aula/{aula_id}")
 def get_aula_por_id(aula_id: int, authorization: str = Header(None)):
-    """Retorna os dados completos de uma aula específica pelo ID"""
-    if not authorization: raise HTTPException(status_code=401)
+    if not authorization:
+        raise HTTPException(status_code=401)
+
     try:
-        res = supabase.table("aulas").select("*").eq("id", aula_id).single().execute()
+        res = supabase.table("aulas").select("*").eq("id", aula_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Aula não encontrada")
-        return res.data
+        return res.data[0]
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Erro ao buscar aula {aula_id}: {e}")
-        raise HTTPException(status_code=500)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/conteudo-didatico/cursos")
 def admin_listar_cursos_didaticos(authorization: str = Header(None)):
