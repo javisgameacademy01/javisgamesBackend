@@ -2104,27 +2104,37 @@ def listar_relatorio_faltas(
 
 
 @router.put("/relatorio-faltas/{id_relatorio}")
-def atualizar_linha_falta(
-    id_relatorio: int,
-    dados: RelatorioFaltasUpdate,
+def atualizar_falta(
+    id_relatorio: str,
+    dados: dict, # Espera {"data_falta": "...", "numero_aula": ...}
     authorization: str = Header(None)
 ):
+    logger.info(f"Tentativa de atualização no registro: {id_relatorio}")
+
     if not authorization:
-        raise HTTPException(status_code=401)
+        raise HTTPException(status_code=401, detail="Não autorizado")
 
     try:
-        payload = dados.model_dump(exclude_unset=True)
+        token = authorization.split(" ")[1]
+        ctx = get_context_usuario(token)
         
-        # Normalização de data vazia para nulo no Supabase
-        if 'data_falta' in payload and not payload['data_falta']:
-            payload['data_falta'] = None
+        # LOG de Payload
+        logger.info(f"Dados recebidos para salvamento: {dados}")
 
-        supabase.table("tb_relatorio_faltas_aula")\
-            .update(payload)\
+        # Execução do Update
+        resp = supabase.table("tb_relatorio_faltas_aula")\
+            .update(dados)\
             .eq("id", id_relatorio)\
             .execute()
-            
-        return {"message": "Linha atualizada com sucesso!"}
+
+        logger.info(f"Update realizado com sucesso para ID {id_relatorio}")
+        return {"status": "success", "data": resp.data}
+
     except Exception as e:
-        logger.error(f"Erro ao salvar falta {id_relatorio}: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        erro_msg = str(e)
+        logger.error(f"ERRO AO SALVAR FALTA: {erro_msg}")
+        
+        if "permission" in erro_msg.lower():
+            raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) ao gravar no banco.")
+            
+        raise HTTPException(status_code=500, detail=f"Erro interno: {erro_msg}")
