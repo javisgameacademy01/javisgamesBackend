@@ -2090,53 +2090,75 @@ def stats_frequencia(authorization: str = Header(None)):
 
 @router.get("/dashboard-frequencia-detalhada")
 def stats_frequencia_detalhada(authorization: str = Header(None)):
+    """
+    Retorna estatísticas detalhadas de frequência agrupadas por:
+    Curso, Turma, Mês, Professor e Alunos com mais faltas.
+    """
     if not authorization:
-        raise HTTPException(status_code=401)
+        raise HTTPException(status_code=401, detail="Token não fornecido")
     
     try:
+        # Busca todos os eventos de frequência registrados
         resp = supabase.table("tb_frequencia_eventos").select("*").execute()
         dados = resp.data or []
         
+        # Estrutura inicial dos dados para o Dashboard
         stats = {
             "por_curso": {},
             "por_turma": {},
             "por_mes": {},
-            "alunos_criticos": {} # Novo agrupamento para o ranking
+            "por_professor": {}, # Novo agrupamento solicitado
+            "alunos_criticos": {} # Para o ranking de faltas
         }
 
         for item in dados:
+            # Extração dos campos com valores padrão para evitar erros
             curso = item.get('curso') or 'Não Definido'
             turma = item.get('turma') or 'Sem Turma'
-            mes = item.get('data_aula', '0000-00')[:7] 
-            status = item.get('status')
+            prof = item.get('professor') or 'Sem Professor'
+            # Pega apenas o Ano-Mês (YYYY-MM) da data da aula
+            mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
+            status = item.get('status') # 'P' ou 'F'
             nome_aluno = item.get('nome')
 
-            # Processamento para gráficos existentes
-            for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes)]:
-                if chave not in stats[cat]:
-                    stats[cat][chave] = {"P": 0, "F": 0}
-                if status in ["P", "F"]:
-                    stats[cat][chave][status] += 1
+            # 1. Agrupamento Geral (Curso, Turma, Mês, Professor)
+            categorias = [
+                ("por_curso", curso),
+                ("por_turma", turma),
+                ("por_mes", mes),
+                ("por_professor", prof)
+            ]
 
-            # Lógica para Ranking de Alunos (apenas se for falta)
+            for cat_nome, chave in categorias:
+                if chave not in stats[cat_nome]:
+                    stats[cat_nome][chave] = {"P": 0, "F": 0}
+                
+                if status in ["P", "F"]:
+                    stats[cat_nome][chave][status] += 1
+
+            # 2. Agrupamento para Alunos Críticos (Ranking de Faltas)
             if status == 'F' and nome_aluno:
                 if nome_aluno not in stats["alunos_criticos"]:
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        # Transformar o dicionário de críticos em uma lista ordenada pelos que mais faltaram
+        # 3. Processamento do Ranking (Transforma dict em lista ordenada)
         lista_criticos = []
         for nome, info in stats["alunos_criticos"].items():
-            lista_criticos.append({"nome": nome, "faltas": info["faltas"], "turma": info["turma"]})
+            lista_criticos.append({
+                "nome": nome, 
+                "faltas": info["faltas"], 
+                "turma": info["turma"]
+            })
         
-        # Ordena do maior para o menor e pega os 10 primeiros
+        # Ordena do maior número de faltas para o menor e limita aos top 10
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
+
     except Exception as e:
         logger.error(f"Erro ao gerar estatísticas detalhadas: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=f"Erro no servidor: {str(e)}")
 
 @router.patch("/frequencia-eventos/{id_registro}")
 def atualizar_frequencia_evento(
