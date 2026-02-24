@@ -2197,3 +2197,31 @@ def atualizar_linha_manual(id_relatorio: int, dados: dict, authorization: str = 
         if "permission" in msg.lower():
             raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) ao gravar.")
         raise HTTPException(status_code=500, detail=msg)
+
+@router.get("/relatorio-frequencia-geral")
+def listar_frequencia_geral(
+    q: Optional[str] = None,
+    turma: Optional[str] = None,
+    authorization: str = Header(None)
+):
+    if not authorization:
+        raise HTTPException(status_code=401)
+    
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    try:
+        # Busca na nova tabela tb_frequencia_eventos
+        query = supabase.table("tb_frequencia_eventos").select("*")
+
+        if q:
+            query = query.ilike("nome", f"%{q}%")
+        if turma:
+            query = query.eq("turma", turma)
+            
+        # Ordenar por data mais recente
+        resp = query.order("data_aula", desc=True).limit(500).execute()
+        return resp.data
+    except Exception as e:
+        logger.error(f"Erro frequencia eventos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
