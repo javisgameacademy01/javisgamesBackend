@@ -46,9 +46,6 @@ from app.modelos import (
     NovoUsuarioData
 
 )
-class RelatorioFaltasUpdate(BaseModel):
-    data_falta: Optional[str] = None # Formato YYYY-MM-DD
-    numero_aula: Optional[int] = None
 
 # Logger
 logger = logging.getLogger(__name__)
@@ -2041,131 +2038,162 @@ def supabase_authed(token: str) -> Client:
 # =============================
 
 
+# =============================
+# Relatório de Faltas/Presenças (novo modelo via view)
+# Views esperadas no Supabase:
+# - vw_relatorio_frequencia
+# - vw_dash_frequencia_por_aluno
+# - vw_dash_frequencia_por_turma
+# - vw_dash_frequencia_por_curso
+# - vw_dash_frequencia_por_mes_ano
+# =============================
+
 class RelatorioFaltasUpdate(BaseModel):
-    data_falta: Optional[str] = None  # YYYY-MM-DD
-    numero_aula: Optional[int] = None
+    data_aula: Optional[str] = None   # YYYY-MM-DD (se você permitir editar)
+    status: Optional[str] = None      # 'P' ou 'F'
+    turma: Optional[str] = None
 
 
-@router.get("/relatorio-faltas") # Certifique-se de ajustar para "/admin/relatorio-faltas" se necessário
+@router.get("/relatorio-faltas")
 def listar_relatorio_faltas(
     turma: Optional[str] = None,
-    authorization: str = Header(None)
+    curso: Optional[str] = None,
+    mes_ano: Optional[str] = None,      # "YYYY-MM"
+    data_ini: Optional[str] = None,     # "YYYY-MM-DD"
+    data_fim: Optional[str] = None,     # "YYYY-MM-DD"
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
 ):
-    # LOG 1: Verificar se o Header chegou
-    logger.info(f"Requisição recebida. Authorization Header: {authorization[:20] if authorization else 'VAZIO'}...")
-
     if not authorization:
-        logger.warning("Erro: Header de autorização ausente.")
-        raise HTTPException(status_code=401, detail="Token de autorização ausente")
+        raise HTTPException(status_code=401)
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
 
     try:
-        # LOG 2: Extração do Token
-        if " " not in authorization:
-            logger.error("Erro: Formato do Header inválido. Esperado 'Bearer <token>'.")
-            raise HTTPException(status_code=401, detail="Formato de Token inválido")
-            
-        token = authorization.split(" ")[1]
-        
-        # LOG 3: Validar contexto do usuário
-        ctx = get_contexto_usuario(token)
-        logger.info(f"Usuário autenticado com sucesso: {ctx.get('id_colaborador', 'ID Desconhecido')}")
+        q = supabase.table("vw_relatorio_frequencia").select("*")
 
-        # Montagem da Query
-        query = supabase.table("tb_relatorio_faltas_aula").select("""
-            id, created_at, id_aluno, matricula, aluno_nome, telefones_raw, 
-            codigo_turma, data_falta, numero_aula, fonte_tipo, fonte_id, 
-            falta_seq, qtd_faltas_total, ultima_falta, professor
-        """)
+        # escopo por unidade (nível 8 vê só a unidade / nível 9+ vê tudo)
+        if ctx.get("nivel", 0) < 9 and ctx.get("id_unidade") is not None:
+            q = q.eq("id_unidade", ctx["id_unidade"])
 
         if turma:
-            query = query.eq("codigo_turma", turma)
+            q = q.eq("turma", turma)
+        if curso:
+            q = q.eq("curso", curso)
+        if mes_ano:
+            q = q.eq("mes_ano", mes_ano)
+        if data_ini:
+            q = q.gte("data_aula", data_ini)
+        if data_fim:
+            q = q.lte("data_aula", data_fim)
 
-        # LOG 4: Execução no Supabase
-        resp = query.order("codigo_turma").order("aluno_nome").execute()
-        
-        # LOG 5: Verificar dados retornados
-        logger.info(f"Busca finalizada. Registros encontrados: {len(resp.data) if resp.data else 0}")
-        
+        resp = (
+            q.order("data_aula", desc=False)
+             .order("turma", desc=False)
+             .order("nome", desc=False)
+             .range(offset, offset + limit - 1)
+             .execute()
+        )
         return resp.data or []
-
     except Exception as e:
-        # LOG DE ERRO CRÍTICO
-        # Aqui ele vai te dizer se o banco rejeitou por RLS ou se o token é inválido
-        erro_detalhado = str(e)
-        logger.error(f"FALHA NO RELATÓRIO: {erro_detalhado}")
-
-        if "JWT" in erro_detalhado or "invalid" in erro_detalhado.lower():
-            raise HTTPException(status_code=401, detail=f"Token Inválido ou Expirado: {erro_detalhado}")
-        
-        if "permission" in erro_detalhado.lower():
-            raise HTTPException(status_code=403, detail="Erro de Permissão no Banco (RLS)")
-
-        raise HTTPException(status_code=500, detail="Erro interno ao processar relatório.")
+        raise HTTPException(status_code=500, detail=f"Erro ao listar frequência: {e}")
 
 
-@router.put("/relatorio-faltas/{id_relatorio}")
-def atualizar_falta(
-    id_relatorio: str,
-    dados: dict, # Espera {"data_falta": "...", "numero_aula": ...}
-    authorization: str = Header(None)
-):
-    logger.info(f"Tentativa de atualização no registro: {id_relatorio}")
+@router.get("/relatorio-faltas/dashboard")
+def dashboard_relatorio_faltas_presencas(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
 
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    try:
+        filtro_unidade = None
+        if ctx.get("nivel", 0) < 9 and ctx.get("id_unidade") is not None:
+            filtro_unidade = ctx["id_unidade"]
+
+        def fetch(view_name: str):
+            q = supabase.table(view_name).select("*")
+            if filtro_unidade is not None:
+                q = q.eq("id_unidade", filtro_unidade)
+            return q.execute().data or []
+
+        return {
+            "por_aluno": fetch("vw_dash_frequencia_por_aluno"),
+            "por_turma": fetch("vw_dash_frequencia_por_turma"),
+            "por_curso": fetch("vw_dash_frequencia_por_curso"),
+            "por_mes_ano": fetch("vw_dash_frequencia_por_mes_ano"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao montar dashboard: {e}")
+
+
+# =========================================================
+# Cadastro manual (se você quiser manter edição manual)
+# Sugestão: salvar em tb_relatorio_faltas_aula (tabela “manual”)
+# =========================================================
+
+@router.post("/relatorio-faltas/manual")
+def cadastrar_linha_manual(dados: dict, authorization: str = Header(None)):
+    """
+    Espera payload compatível com tb_relatorio_faltas_aula.
+    Ex: { aluno_nome, codigo_turma, data_falta, numero_aula, professor, ... }
+    """
     if not authorization:
         raise HTTPException(status_code=401, detail="Não autorizado")
 
-    try:
-        token = authorization.split(" ")[1]
-        ctx = get_context_usuario(token)
-        
-        # LOG de Payload
-        logger.info(f"Dados recebidos para salvamento: {dados}")
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
 
-        # Execução do Update
-        resp = supabase.table("tb_relatorio_faltas_aula")\
-            .update(dados)\
-            .eq("id", id_relatorio)\
-            .execute()
-
-        logger.info(f"Update realizado com sucesso para ID {id_relatorio}")
-        return {"status": "success", "data": resp.data}
-
-    except Exception as e:
-        erro_msg = str(e)
-        logger.error(f"ERRO AO SALVAR FALTA: {erro_msg}")
-        
-        if "permission" in erro_msg.lower():
-            raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) ao gravar no banco.")
-            
-        raise HTTPException(status_code=500, detail=f"Erro interno: {erro_msg}")
-
-@router.post("/admin/relatorio-faltas")
-def cadastrar_falta_manual(
-    dados: dict,
-    authorization: str = Header(None)
-):
-    logger.info(f"Recebendo cadastro manual de falta: {dados}")
-
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Não autorizado")
+    # Permissão (ajuste como quiser)
+    if ctx.get("nivel", 0) < 5:
+        raise HTTPException(status_code=403, detail="Acesso restrito")
 
     try:
-        token = authorization.split(" ")[1]
-        ctx = get_contexto_usuario(token) # Valida se é um professor/admin
-        
-        # Adiciona o nome do professor que está cadastrando se não vier no payload
-        if "professor" not in dados:
-            dados["professor"] = ctx.get("nome")
+        # busca nome do colaborador para preencher professor (se não vier)
+        if not dados.get("professor"):
+            col = (
+                supabase.table("tb_colaboradores")
+                .select("nome_completo")
+                .eq("user_id", ctx["user_id"])
+                .single()
+                .execute()
+            )
+            if col.data and col.data.get("nome_completo"):
+                dados["professor"] = col.data["nome_completo"]
 
-        # Inserção no Supabase
         resp = supabase.table("tb_relatorio_faltas_aula").insert(dados).execute()
-
-        logger.info(f"Falta cadastrada manualmente com sucesso para o aluno {dados.get('aluno_nome')}")
         return {"status": "success", "data": resp.data}
-
     except Exception as e:
-        logger.error(f"ERRO AO CADASTRAR FALTA MANUAL: {str(e)}")
-        # Se o erro de RLS persistir aqui, o logger vai avisar
-        if "permission" in str(e).lower():
-            raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) no banco ao inserir.")
-        raise HTTPException(status_code=500, detail=str(e))
+        msg = str(e)
+        if "permission" in msg.lower():
+            raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) ao inserir.")
+        raise HTTPException(status_code=500, detail=msg)
+
+
+@router.put("/relatorio-faltas/manual/{id_relatorio}")
+def atualizar_linha_manual(id_relatorio: int, dados: dict, authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    if ctx.get("nivel", 0) < 5:
+        raise HTTPException(status_code=403, detail="Acesso restrito")
+
+    try:
+        resp = (
+            supabase.table("tb_relatorio_faltas_aula")
+            .update(dados)
+            .eq("id", id_relatorio)
+            .execute()
+        )
+        return {"status": "success", "data": resp.data}
+    except Exception as e:
+        msg = str(e)
+        if "permission" in msg.lower():
+            raise HTTPException(status_code=403, detail="Erro de Permissão (RLS) ao gravar.")
+        raise HTTPException(status_code=500, detail=msg)
