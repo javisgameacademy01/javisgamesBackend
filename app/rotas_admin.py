@@ -2089,39 +2089,53 @@ def stats_frequencia(authorization: str = Header(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard-frequencia-detalhada")
-def stats_frequencia_detalhada(authorization: str = Header(None)):
+def stats_frequencia_detalhada(
+    data_inicio: str = None, 
+    data_fim: str = None, 
+    authorization: str = Header(None)
+):
     """
-    Retorna estatísticas detalhadas de frequência agrupadas por:
-    Curso, Turma, Mês, Professor e Alunos com mais faltas.
+    Retorna estatísticas detalhadas de frequência filtradas por período.
+    Agrupamentos: Curso, Turma, Mês, Professor e Alunos Críticos.
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Token não fornecido")
     
     try:
-        # Busca todos os eventos de frequência registrados
-        resp = supabase.table("tb_frequencia_eventos").select("*").execute()
+        # Iniciamos a query na tabela de eventos
+        query = supabase.table("tb_frequencia_eventos").select("*")
+        
+        # Aplicamos os filtros de data apenas se o usuário preencher os campos no Dashboard
+        if data_inicio:
+            # gte = Greater Than or Equal (Data Aula >= Data Início)
+            query = query.gte("data_aula", data_inicio)
+        if data_fim:
+            # lte = Less Than or Equal (Data Aula <= Data Fim)
+            query = query.lte("data_aula", data_fim)
+            
+        # Executa a query com os filtros aplicados
+        resp = query.execute()
         dados = resp.data or []
         
-        # Estrutura inicial dos dados para o Dashboard
+        # Estrutura para os gráficos e ranking
         stats = {
             "por_curso": {},
             "por_turma": {},
             "por_mes": {},
-            "por_professor": {}, # Novo agrupamento solicitado
-            "alunos_criticos": {} # Para o ranking de faltas
+            "por_professor": {},
+            "alunos_criticos": {}
         }
 
         for item in dados:
-            # Extração dos campos com valores padrão para evitar erros
             curso = item.get('curso') or 'Não Definido'
             turma = item.get('turma') or 'Sem Turma'
             prof = item.get('professor') or 'Sem Professor'
-            # Pega apenas o Ano-Mês (YYYY-MM) da data da aula
+            # Extrai o mês no formato YYYY-MM para o gráfico de linha
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
-            status = item.get('status') # 'P' ou 'F'
+            status = item.get('status')
             nome_aluno = item.get('nome')
 
-            # 1. Agrupamento Geral (Curso, Turma, Mês, Professor)
+            # Agrupamento para os 4 gráficos principais
             categorias = [
                 ("por_curso", curso),
                 ("por_turma", turma),
@@ -2136,13 +2150,13 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
                 if status in ["P", "F"]:
                     stats[cat_nome][chave][status] += 1
 
-            # 2. Agrupamento para Alunos Críticos (Ranking de Faltas)
+            # Lógica para o Ranking de Alunos com mais faltas no período selecionado
             if status == 'F' and nome_aluno:
                 if nome_aluno not in stats["alunos_criticos"]:
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        # 3. Processamento do Ranking (Transforma dict em lista ordenada)
+        # Transformação do dicionário de críticos em lista ordenada para o frontend
         lista_criticos = []
         for nome, info in stats["alunos_criticos"].items():
             lista_criticos.append({
@@ -2151,14 +2165,14 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
                 "turma": info["turma"]
             })
         
-        # Ordena do maior número de faltas para o menor e limita aos top 10
+        # Ordenamos do aluno com mais faltas para o com menos
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
 
     except Exception as e:
-        logger.error(f"Erro ao gerar estatísticas detalhadas: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro no servidor: {str(e)}")
+        logger.error(f"Erro ao filtrar estatísticas de frequência: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 @router.patch("/frequencia-eventos/{id_registro}")
 def atualizar_frequencia_evento(
