@@ -2068,12 +2068,12 @@ def stats_frequencia(authorization: str = Header(None)):
         raise HTTPException(status_code=401)
     
     try:
-        # Busca todos os status para contar
+        # Busca os registros da tabela de frequências
         resp = supabase.table("tb_frequencia_eventos").select("status").execute()
-        dados = resp.data
+        dados = resp.data or []
         
-        presencas = sum(1 for item in dados if item['status'] == 'P')
-        faltas = sum(1 for item in dados if item['status'] == 'F')
+        presencas = sum(1 for item in dados if item.get('status') == 'P')
+        faltas = sum(1 for item in dados if item.get('status') == 'F')
         
         return {
             "presencas": presencas,
@@ -2081,4 +2081,5 @@ def stats_frequencia(authorization: str = Header(None)):
             "total": len(dados)
         }
     except Exception as e:
+        logger.error(f"Erro stats frequência: {e}")
         raise HTTPException(status_code=500, detail=str(e))
