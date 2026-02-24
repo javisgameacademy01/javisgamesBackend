@@ -2090,6 +2090,7 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
         raise HTTPException(status_code=401)
     
     try:
+        # Busca todos os dados da tabela de frequências
         resp = supabase.table("tb_frequencia_eventos").select("*").execute()
         dados = resp.data or []
         
@@ -2102,18 +2103,21 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
         for item in dados:
             curso = item.get('curso') or 'Não Definido'
             turma = item.get('turma') or 'Sem Turma'
-            # Extrai YYYY-MM da data
+            # Extrai o mês e ano (YYYY-MM) da data da aula
             mes = item.get('data_aula', '0000-00')[:7] 
             status = item.get('status')
 
-            # Inicializa estruturas se não existirem
+            # Inicializa e incrementa os contadores para cada categoria
             for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes)]:
                 if chave not in stats[cat]:
                     stats[cat][chave] = {"P": 0, "F": 0}
-                if status in ["P", "F"]:
-                    stats[cat][chave][status] += 1
+                
+                if status == 'P':
+                    stats[cat][chave]["P"] += 1
+                elif status == 'F':
+                    stats[cat][chave]["F"] += 1
 
         return stats
     except Exception as e:
+        logger.error(f"Erro ao gerar estatísticas detalhadas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
