@@ -2139,12 +2139,36 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
 
 
 @router.patch("/frequencia-eventos/{id_registro}")
-def atualizar_frequencia_evento(id_registro: int, dados: dict, authorization: str = Header(None)):
+def atualizar_frequencia_evento(
+    id_registro: int, 
+    dados: dict, 
+    authorization: str = Header(None)
+):
+    """
+    Atualiza registros de frequência (Status, Professor ou Curso).
+    Recebe um dicionário 'dados' contendo as chaves a serem alteradas.
+    """
     if not authorization:
-        raise HTTPException(status_code=401)
+        raise HTTPException(status_code=401, detail="Token não fornecido")
+
     try:
-        # O .update(dados) vai salvar tudo o que enviares no JSON (status, professor, curso)
-        resp = supabase.table("tb_frequencia_eventos").update(dados).eq("id", id_registro).execute()
-        return {"status": "success", "data": resp.data}
+        # O Supabase permite passar o dicionário diretamente para o .update()
+        # Isso atualizará apenas as colunas enviadas (ex: {"curso": "Novo", "professor": "Mestre"})
+        resp = supabase.table("tb_frequencia_eventos")\
+            .update(dados)\
+            .eq("id", id_registro)\
+            .execute()
+        
+        # Verifica se o registro existia e foi alterado
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="Registro de frequência não encontrado")
+            
+        return {
+            "status": "success", 
+            "message": "Frequência atualizada com sucesso",
+            "data": resp.data
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Erro ao atualizar frequência ID {id_registro}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno no servidor: {str(e)}")
