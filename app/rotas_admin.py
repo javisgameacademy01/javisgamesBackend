@@ -2094,32 +2094,43 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
         raise HTTPException(status_code=401)
     
     try:
-        # Busca todos os dados da tabela de frequências
         resp = supabase.table("tb_frequencia_eventos").select("*").execute()
         dados = resp.data or []
         
         stats = {
             "por_curso": {},
             "por_turma": {},
-            "por_mes": {}
+            "por_mes": {},
+            "alunos_criticos": {} # Novo agrupamento para o ranking
         }
 
         for item in dados:
             curso = item.get('curso') or 'Não Definido'
             turma = item.get('turma') or 'Sem Turma'
-            # Extrai o mês e ano (YYYY-MM) da data da aula
             mes = item.get('data_aula', '0000-00')[:7] 
             status = item.get('status')
+            nome_aluno = item.get('nome')
 
-            # Inicializa e incrementa os contadores para cada categoria
+            # Processamento para gráficos existentes
             for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes)]:
                 if chave not in stats[cat]:
                     stats[cat][chave] = {"P": 0, "F": 0}
-                
-                if status == 'P':
-                    stats[cat][chave]["P"] += 1
-                elif status == 'F':
-                    stats[cat][chave]["F"] += 1
+                if status in ["P", "F"]:
+                    stats[cat][chave][status] += 1
+
+            # Lógica para Ranking de Alunos (apenas se for falta)
+            if status == 'F' and nome_aluno:
+                if nome_aluno not in stats["alunos_criticos"]:
+                    stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
+                stats["alunos_criticos"][nome_aluno]["faltas"] += 1
+
+        # Transformar o dicionário de críticos em uma lista ordenada pelos que mais faltaram
+        lista_criticos = []
+        for nome, info in stats["alunos_criticos"].items():
+            lista_criticos.append({"nome": nome, "faltas": info["faltas"], "turma": info["turma"]})
+        
+        # Ordena do maior para o menor e pega os 10 primeiros
+        stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
     except Exception as e:
