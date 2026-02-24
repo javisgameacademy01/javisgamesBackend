@@ -2136,3 +2136,25 @@ def stats_frequencia_detalhada(authorization: str = Header(None)):
     except Exception as e:
         logger.error(f"Erro ao gerar estatísticas detalhadas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/frequencia-eventos/{id_registro}")
+def atualizar_frequencia_evento(
+    id_registro: int, 
+    dados: dict, 
+    authorization: str = Header(None)
+):
+    if not authorization:
+        raise HTTPException(status_code=401)
+
+    try:
+        # Atualiza o status ou o professor na tb_frequencia_eventos
+        resp = supabase.table("tb_frequencia_eventos")\
+            .update(dados)\
+            .eq("id", id_registro)\
+            .execute()
+            
+        return {"status": "success", "data": resp.data}
+    except Exception as e:
+        logger.error(f"Erro ao atualizar frequência: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
