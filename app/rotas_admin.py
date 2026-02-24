@@ -2083,3 +2083,37 @@ def stats_frequencia(authorization: str = Header(None)):
     except Exception as e:
         logger.error(f"Erro stats frequência: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/dashboard-frequencia-detalhada")
+def stats_frequencia_detalhada(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
+    
+    try:
+        resp = supabase.table("tb_frequencia_eventos").select("*").execute()
+        dados = resp.data or []
+        
+        stats = {
+            "por_curso": {},
+            "por_turma": {},
+            "por_mes": {}
+        }
+
+        for item in dados:
+            curso = item.get('curso') or 'Não Definido'
+            turma = item.get('turma') or 'Sem Turma'
+            # Extrai YYYY-MM da data
+            mes = item.get('data_aula', '0000-00')[:7] 
+            status = item.get('status')
+
+            # Inicializa estruturas se não existirem
+            for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes)]:
+                if chave not in stats[cat]:
+                    stats[cat][chave] = {"P": 0, "F": 0}
+                if status in ["P", "F"]:
+                    stats[cat][chave][status] += 1
+
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
