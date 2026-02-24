@@ -2062,3 +2062,23 @@ def listar_frequencia_geral(
         logger.error(f"Erro na tabela frequencia_eventos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/dashboard-frequencia-stats")
+def stats_frequencia(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
+    
+    try:
+        # Busca todos os status para contar
+        resp = supabase.table("tb_frequencia_eventos").select("status").execute()
+        dados = resp.data
+        
+        presencas = sum(1 for item in dados if item['status'] == 'P')
+        faltas = sum(1 for item in dados if item['status'] == 'F')
+        
+        return {
+            "presencas": presencas,
+            "faltas": faltas,
+            "total": len(dados)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
