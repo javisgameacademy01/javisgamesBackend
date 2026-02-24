@@ -2036,7 +2036,6 @@ def supabase_authed(token: str) -> Client:
 @router.get("/relatorio-frequencia-geral")
 def listar_frequencia_geral(
     q: Optional[str] = None,
-    turma: Optional[str] = None,
     authorization: str = Header(None)
 ):
     if not authorization:
@@ -2046,17 +2045,20 @@ def listar_frequencia_geral(
     ctx = get_contexto_usuario(token)
 
     try:
-        # Busca na nova tabela tb_frequencia_eventos
+        # Consulta simples na nova tabela para evitar erro 500
         query = supabase.table("tb_frequencia_eventos").select("*")
+
+        # Se não for nível 9+, filtra pela unidade do colaborador (se a coluna existir)
+        # Se sua tabela NÃO tiver id_unidade, remova as duas linhas abaixo
+        # if ctx['nivel'] < 9:
+        #    query = query.eq("id_unidade", ctx['id_unidade'])
 
         if q:
             query = query.ilike("nome", f"%{q}%")
-        if turma:
-            query = query.eq("turma", turma)
             
-        # Ordenar por data mais recente
-        resp = query.order("data_aula", desc=True).limit(500).execute()
-        return resp.data
+        resp = query.order("data_aula", desc=True).limit(200).execute()
+        return resp.data # Retorna a lista diretamente
     except Exception as e:
-        logger.error(f"Erro frequencia eventos: {e}")
+        logger.error(f"Erro na tabela frequencia_eventos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
