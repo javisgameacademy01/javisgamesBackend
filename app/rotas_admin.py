@@ -2218,3 +2218,87 @@ def atualizar_frequencia_evento(
     except Exception as e:
         logger.error(f"Erro ao atualizar frequência ID {id_registro}: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno no servidor: {str(e)}")
+
+@router.get("/dashboard-frequencia-unificado")
+def stats_frequencia_unificado(
+    data_inicio: str = None, 
+    data_fim: str = None, 
+    authorization: str = Header(None)
+):
+    """
+    Retorna estatísticas unificadas (Globais e Detalhadas) em uma única chamada.
+    Otimiza a performance e garante sincronia total dos filtros.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token não fornecido")
+    
+    try:
+        # Inicia a consulta ao banco de dados
+        query = supabase.table("tb_frequencia_eventos").select("*")
+        
+        # Filtros de data aplicados diretamente no banco de dados (Indexados)
+        if data_inicio:
+            query = query.gte("data_aula", data_inicio)
+        if data_fim:
+            query = query.lte("data_aula", data_fim)
+            
+        resp = query.execute()
+        dados = resp.data or []
+        
+        # Estrutura de resposta completa
+        stats = {
+            "global": {"presencas": 0, "faltas": 0, "assiduidade": 0},
+            "por_curso": {},
+            "por_turma": {},
+            "por_mes": {},
+            "por_professor": {},
+            "alunos_criticos": {}
+        }
+
+        for item in dados:
+            status = item.get('status')
+            curso = item.get('curso') or 'Não Definido'
+            turma = item.get('turma') or 'Sem Turma'
+            prof = item.get('professor') or 'Sem Professor'
+            mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
+            nome_aluno = item.get('nome')
+
+            # 1. Contagem Global
+            if status == 'P': stats["global"]["presencas"] += 1
+            elif status == 'F': stats["global"]["faltas"] += 1
+
+            # 2. Agrupamentos para os Gráficos de Barra/Linha
+            categorias = [
+                ("por_curso", curso),
+                ("por_turma", turma),
+                ("por_mes", mes),
+                ("por_professor", prof)
+            ]
+
+            for cat_nome, chave in categorias:
+                if chave not in stats[cat_nome]:
+                    stats[cat_nome][chave] = {"P": 0, "F": 0}
+                if status in ["P", "F"]:
+                    stats[cat_nome][chave][status] += 1
+
+            # 3. Ranking de Alunos Críticos
+            if status == 'F' and nome_aluno:
+                if nome_aluno not in stats["alunos_criticos"]:
+                    stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
+                stats["alunos_criticos"][nome_aluno]["faltas"] += 1
+
+        # Finalização: Cálculo de assiduidade global
+        total = stats["global"]["presencas"] + stats["global"]["faltas"]
+        if total > 0:
+            stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
+
+        # Finalização: Ordenação de alunos críticos
+        lista_criticos = [{"nome": k, "faltas": v["faltas"], "turma": v["turma"]} 
+                          for k, v in stats["alunos_criticos"].items()]
+        stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Erro no dashboard unificado: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
