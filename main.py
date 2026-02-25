@@ -34,12 +34,14 @@ load_dotenv()
 app = FastAPI()
 
 # 2. Configura o CORS
+# 2. Configura o CORS (MODIFICADO PARA RESOLVER O BLOQUEIO)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=False,
+    allow_origins=["*"], # Em produção, substitua pelo seu domínio ex: ["https://seu-site.com"]
+    allow_credentials=True, # Mude para True para aceitar Cookies/Auth Headers
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"] # Adicionado para garantir que o JS veja as respostas
 )
 
 # 3. Configura o Supabase
