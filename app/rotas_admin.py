@@ -2063,29 +2063,39 @@ def listar_frequencia_geral(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard-frequencia-stats")
-def stats_frequencia(authorization: str = Header(None)):
+def get_frequencia_stats(
+    data_inicio: str = None, 
+    data_fim: str = None, 
+    authorization: str = Header(None)
+):
     if not authorization:
         raise HTTPException(status_code=401)
-    
+
     try:
-        resp = supabase.table("tb_frequencia_eventos").select("status").execute()
+        # Começa a query
+        query = supabase.table("tb_frequencia_eventos").select("status")
+        
+        # APLICA OS MESMOS FILTROS AQUI
+        if data_inicio:
+            query = query.gte("data_aula", data_inicio)
+        if data_fim:
+            query = query.lte("data_aula", data_fim)
+            
+        resp = query.execute()
         dados = resp.data or []
         
-        presencas = sum(1 for item in dados if item.get('status') == 'P')
-        faltas = sum(1 for item in dados if item.get('status') == 'F')
-        total = len(dados)
+        presencas = sum(1 for x in dados if x['status'] == 'P')
+        faltas = sum(1 for x in dados if x['status'] == 'F')
+        total = presencas + faltas
         
-        # Cálculo da porcentagem de presença
         assiduidade = round((presencas / total * 100), 1) if total > 0 else 0
         
         return {
             "presencas": presencas,
             "faltas": faltas,
-            "total": total,
             "assiduidade": assiduidade
         }
     except Exception as e:
-        logger.error(f"Erro stats frequência: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard-frequencia-detalhada")
