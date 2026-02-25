@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 import requests
 import logging
-from typing import Optional
+from typing import Optional, List
 from app.modelos import (
     FestaAniversarioCreate,
     FestaAniversarioUpdate,
@@ -127,6 +127,16 @@ def get_contexto_usuario(token: str):
     except Exception as e:
         print(f"Erro contexto usuario: {e}")
         raise HTTPException(status_code=401, detail="Usuário não identificado.")
+
+def obter_dados_token(authorization: str):
+    """Extrai o contexto do usuário a partir do Header de autorização."""
+    try:
+        # Pega a parte após o 'Bearer '
+        token = authorization.split(" ")[1]
+        return get_contexto_usuario(token)
+    except Exception as e:
+        logger.error(f"Erro ao decodificar token: {e}")
+        raise HTTPException(status_code=401, detail="Sessão inválida ou expirada.")
 
 
 # --- ROTAS ---
@@ -2105,18 +2115,13 @@ def stats_frequencia_unificado(
     data_fim: str = None, 
     authorization: str = Header(None)
 ):
-    """
-    Retorna estatísticas unificadas (Globais e Detalhadas) em uma única chamada.
-    Otimiza a performance e garante sincronia total dos filtros.
-    """
     if not authorization:
-        raise HTTPException(status_code=401, detail="Token não fornecido")
+        raise HTTPException(status_code=401, detail="Token ausente")
     
     try:
-        # Inicia a consulta ao banco de dados
+        # Inicia consulta na tabela de eventos (onde estão os dados históricos)
         query = supabase.table("tb_frequencia_eventos").select("*")
         
-        # Filtros de data aplicados diretamente no banco de dados (Indexados)
         if data_inicio:
             query = query.gte("data_aula", data_inicio)
         if data_fim:
@@ -2125,7 +2130,6 @@ def stats_frequencia_unificado(
         resp = query.execute()
         dados = resp.data or []
         
-        # Estrutura de resposta completa
         stats = {
             "global": {"presencas": 0, "faltas": 0, "assiduidade": 0},
             "por_curso": {},
@@ -2147,74 +2151,57 @@ def stats_frequencia_unificado(
             if status == 'P': stats["global"]["presencas"] += 1
             elif status == 'F': stats["global"]["faltas"] += 1
 
-            # 2. Agrupamentos para os Gráficos de Barra/Linha
-            categorias = [
-                ("por_curso", curso),
-                ("por_turma", turma),
-                ("por_mes", mes),
-                ("por_professor", prof)
-            ]
-
-            for cat_nome, chave in categorias:
-                if chave not in stats[cat_nome]:
-                    stats[cat_nome][chave] = {"P": 0, "F": 0}
+            # 2. Agrupamentos para Gráficos
+            for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes), ("por_professor", prof)]:
+                if chave not in stats[cat]:
+                    stats[cat][chave] = {"P": 0, "F": 0}
                 if status in ["P", "F"]:
-                    stats[cat_nome][chave][status] += 1
+                    stats[cat][chave][status] += 1
 
-            # 3. Ranking de Alunos Críticos
+            # 3. Alunos Críticos
             if status == 'F' and nome_aluno:
                 if nome_aluno not in stats["alunos_criticos"]:
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        # Finalização: Cálculo de assiduidade global
+        # Cálculos finais
         total = stats["global"]["presencas"] + stats["global"]["faltas"]
         if total > 0:
             stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
 
-        # Finalização: Ordenação de alunos críticos
         lista_criticos = [{"nome": k, "faltas": v["faltas"], "turma": v["turma"]} 
                           for k, v in stats["alunos_criticos"].items()]
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
-
     except Exception as e:
         logger.error(f"Erro no dashboard unificado: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chamada/salvar-v2")
-def salvar_chamada_estruturada(lista: list, authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=401)
+def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
     
-    # 1. Identifica quem é o professor logado pelo token
-    # (Supondo que tens uma função para extrair o id_colaborador do token)
-    usuario_info = obter_dados_token(authorization) 
-    id_prof = usuario_info.get("id_colaborador")
+    # Obtém o ID do professor através do token
+    token_str = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token_str)
+    id_prof = ctx.get("id_colaborador")
 
     try:
-        # 2. Prepara os dados para inserção na tb_chamadas
-        dados_insercao = []
+        dados_chamada = []
         for item in lista:
-            dados_insercao.append({
-                "id_aluno": item["id_aluno"],
-                "codigo_turma": item["codigo_turma"],
-                "data_aula": item["data_aula"],
-                "id_professor": id_prof, # Vincula o professor logado
-                "presenca": item["presenca"],
+            dados_chamada.append({
+                "id_aluno": item.id_aluno,
+                "codigo_turma": item.codigo_turma,
+                "data_aula": item.data_aula,
+                "id_professor": id_prof,
+                "presenca": item.presenca,
                 "created_at": datetime.now().isoformat()
             })
 
-        # 3. Insere na tabela estruturada
-        resp = supabase.table("tb_chamadas").insert(dados_insercao).execute()
-        
-        # 4. (Opcional) Também pode alimentar a tb_frequencia_eventos para manter compatibilidade
-        # com relatórios antigos até decidires remover a tabela antiga.
-        
-        return {"status": "success", "count": len(resp.data)}
+        # Salva na tabela oficial
+        supabase.table("tb_chamadas").insert(dados_chamada).execute()
+        return {"status": "success", "count": len(dados_chamada)}
     except Exception as e:
-        logger.error(f"Erro ao salvar chamada: {e}")
+        logger.error(f"Erro ao salvar chamada v2: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
