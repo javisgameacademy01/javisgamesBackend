@@ -2182,3 +2182,39 @@ def stats_frequencia_unificado(
     except Exception as e:
         logger.error(f"Erro no dashboard unificado: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chamada/salvar-v2")
+def salvar_chamada_estruturada(lista: list, authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401)
+    
+    # 1. Identifica quem é o professor logado pelo token
+    # (Supondo que tens uma função para extrair o id_colaborador do token)
+    usuario_info = obter_dados_token(authorization) 
+    id_prof = usuario_info.get("id_colaborador")
+
+    try:
+        # 2. Prepara os dados para inserção na tb_chamadas
+        dados_insercao = []
+        for item in lista:
+            dados_insercao.append({
+                "id_aluno": item["id_aluno"],
+                "codigo_turma": item["codigo_turma"],
+                "data_aula": item["data_aula"],
+                "id_professor": id_prof, # Vincula o professor logado
+                "presenca": item["presenca"],
+                "created_at": datetime.now().isoformat()
+            })
+
+        # 3. Insere na tabela estruturada
+        resp = supabase.table("tb_chamadas").insert(dados_insercao).execute()
+        
+        # 4. (Opcional) Também pode alimentar a tb_frequencia_eventos para manter compatibilidade
+        # com relatórios antigos até decidires remover a tabela antiga.
+        
+        return {"status": "success", "count": len(resp.data)}
+    except Exception as e:
+        logger.error(f"Erro ao salvar chamada: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
