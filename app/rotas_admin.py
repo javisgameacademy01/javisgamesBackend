@@ -831,12 +831,9 @@ def admin_agenda(authorization: str = Header(None)):
     ctx = get_contexto_usuario(token)
     try:
         eventos = []
-        if ctx["nivel"] < 9:
-            alunos = supabase.table("tb_alunos").select("id_aluno").eq("id_unidade", ctx["id_unidade"]).execute()
-            ids = [a["id_aluno"] for a in (alunos.data or [])]
-            resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").in_("id_aluno", ids).execute() if ids else None
-        else:
-            resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").execute()
+        
+        # --- BUSCA FORÇADA PARA VER TUDO ---
+        resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").execute()
 
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
@@ -850,7 +847,9 @@ def admin_agenda(authorization: str = Header(None)):
                     "extendedProps": {"conteudo": rep.get("conteudo_aula"), "id_criador": rep.get("criado_por")}
                 })
         return eventos
-    except: return []
+    except Exception as e: 
+        print(f"Erro agenda: {e}")
+        return []
 
 @router.put("/reposicao-completa/{id_repo}")
 def atualizar_reposicao_completa(id_repo: str, presenca: str = Form(...), observacoes: str = Form(None), arquivo: UploadFile = File(None), authorization: str = Header(None)):
