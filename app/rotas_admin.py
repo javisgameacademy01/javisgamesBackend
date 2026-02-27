@@ -2218,24 +2218,31 @@ async def salvar_chamada_foto(
     arquivo_foto: UploadFile = File(...),
     authorization: str = Header(None)
 ):
-    ctx = obter_dados_token(authorization)
-    id_prof = ctx.get("id_colaborador")
-    lista_alunos_obj = json.loads(lista_alunos)
-
+    # Log de início da operação
+    logger.info(f"Iniciando salvamento de chamada - Turma: {codigo_turma}, Data: {data_aula}")
+    
     try:
-        # 1. Upload para o Supabase Storage (Bucket 'listas-chamada')
+        ctx = obter_dados_token(authorization)
+        id_prof = ctx.get("id_colaborador")
+        lista_alunos_obj = json.loads(lista_alunos)
+
+        # 1. Upload para o Supabase Storage
+        logger.info(f"Tentando upload de imagem para o bucket 'listas-chamada'...")
         file_content = await arquivo_foto.read()
         file_ext = arquivo_foto.filename.split('.')[-1]
         file_path = f"chamadas/{codigo_turma}_{data_aula}.{file_ext}"
         
-        supabase.storage.from_("listas-chamada").upload(
+        # O upload pode falhar se o bucket não existir ou se houver erro de permissão
+        storage_resp = supabase.storage.from_("listas-chamada").upload(
             file_path, 
             file_content, 
             file_options={"content-type": arquivo_foto.content_type, "upsert": "true"}
         )
+        
         foto_url = supabase.storage.from_("listas-chamada").get_public_url(file_path)
+        logger.info(f"Upload concluído com sucesso. URL: {foto_url}")
 
-        # 2. Salvar registros na tb_chamadas com o link da imagem
+        # 2. Preparar registros com o novo campo 'status_presenca'
         dados_insercao = []
         for item in lista_alunos_obj:
             dados_insercao.append({
@@ -2243,16 +2250,26 @@ async def salvar_chamada_foto(
                 "codigo_turma": codigo_turma,
                 "data_aula": data_aula,
                 "id_professor": id_prof,
-                "presenca": item["presenca"],
+                "status_presenca": item["status_presenca"], # Mudança para o novo padrão P/F/R
                 "url_assinatura": foto_url 
             })
 
+        # 3. Inserção no banco de dados
+        logger.info(f"Inserindo {len(dados_insercao)} registros na tb_chamadas...")
         supabase.table("tb_chamadas").insert(dados_insercao).execute()
+        
+        logger.info(f"Chamada da turma {codigo_turma} salva com sucesso pelo prof {id_prof}")
         return {"status": "success", "url_foto": foto_url}
 
     except Exception as e:
-        logger.error(f"Erro salvamento v3: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # LOG DE ERRO CRÍTICO: Captura o erro exato para você ver no console do Render
+        logger.error(f"ERRO CRÍTICO ao salvar chamada: {str(e)}", exc_info=True)
+        
+        # Traduzindo erros comuns para o usuário
+        if "Bucket not found" in str(e):
+            raise HTTPException(status_code=404, detail="Erro no servidor: Bucket 'listas-chamada' não encontrado no Storage.")
+        
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
         
 @router.post("/reposicao/finalizar")
 async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(None)):
