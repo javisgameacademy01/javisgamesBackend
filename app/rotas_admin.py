@@ -832,23 +832,22 @@ def admin_agenda(authorization: str = Header(None)):
     try:
         eventos = []
         
-        # BUSCA ROBUSTA: Traz alunos e professores mesmo que o vínculo esteja parcial (!left)
+        # CORREÇÃO AQUI: Especificamos a chave estrangeira (fkey) id_professor
+        # Usamos o alias "professor" para facilitar o acesso aos dados
         resp_repo = supabase.table("tb_reposicoes")\
-            .select("*, tb_alunos!left(nome_completo), tb_colaboradores!left(nome_completo)")\
+            .select("*, tb_alunos!left(nome_completo), professor:tb_colaboradores!tb_reposicoes_id_professor_fkey!left(nome_completo)")\
             .execute()
 
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
-                # Prioriza nome do banco, mas usa o da planilha como plano B
-                nome_aluno = "Aluno Desconhecido"
-                if rep.get("tb_alunos"):
-                    nome_aluno = rep["tb_alunos"].get("nome_completo", nome_aluno)
+                # Aluno: Pega do Join ou mantém Desconhecido
+                nome_aluno = rep.get("tb_alunos", {}).get("nome_completo") if rep.get("tb_alunos") else "Aluno Desconhecido"
                 
+                # Professor: Pega do novo alias "professor" ou usa o backup da planilha
                 nome_prof = rep.get("professor_nome_kurzy") or "Sem Professor"
-                if rep.get("tb_colaboradores"):
-                    nome_prof = rep["tb_colaboradores"].get("nome_completo") or nome_prof
-                
-                # Cores: Verde (Concluída), Vermelho (Agendada)
+                if rep.get("professor"):
+                    nome_prof = rep["professor"].get("nome_completo") or nome_prof
+
                 cor_evento = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
 
                 eventos.append({
@@ -870,7 +869,8 @@ def admin_agenda(authorization: str = Header(None)):
                 })
         return eventos
     except Exception as e: 
-        logger.error(f"Erro ao carregar agenda: {str(e)}")
+        # O log agora vai mostrar o erro exato caso algo mude
+        print(f"Erro detalhado na agenda: {str(e)}")
         return []
         
 @router.put("/reposicao-completa/{id_repo}")
