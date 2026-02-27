@@ -832,23 +832,23 @@ def admin_agenda(authorization: str = Header(None)):
     try:
         eventos = []
         
-        # BUSCA FLEXÍVEL: Usamos o !left para garantir que a reposição apareça mesmo sem vínculo perfeito
+        # BUSCA ROBUSTA: Traz alunos e professores mesmo que o vínculo esteja parcial (!left)
         resp_repo = supabase.table("tb_reposicoes")\
             .select("*, tb_alunos!left(nome_completo), tb_colaboradores!left(nome_completo)")\
             .execute()
 
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
-                # Pega o nome do aluno do Join ou usa o backup da planilha (se houver)
-                nome_aluno = "Desconhecido"
+                # Prioriza nome do banco, mas usa o da planilha como plano B
+                nome_aluno = "Aluno Desconhecido"
                 if rep.get("tb_alunos"):
-                    nome_aluno = rep["tb_alunos"].get("nome_completo", "Desconhecido")
+                    nome_aluno = rep["tb_alunos"].get("nome_completo", nome_aluno)
                 
-                # Pega o nome do professor do Join ou usa a coluna de backup que criamos na importação
                 nome_prof = rep.get("professor_nome_kurzy") or "Sem Professor"
                 if rep.get("tb_colaboradores"):
                     nome_prof = rep["tb_colaboradores"].get("nome_completo") or nome_prof
-
+                
+                # Cores: Verde (Concluída), Vermelho (Agendada)
                 cor_evento = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
 
                 eventos.append({
@@ -860,18 +860,19 @@ def admin_agenda(authorization: str = Header(None)):
                     "nome_aluno": nome_aluno, 
                     "nome_prof": nome_prof,
                     "conteudo": rep.get("conteudo_aula"), 
-                    "turma": rep.get("codigo_turma") or rep.get("disciplina_kurzy"), 
+                    "turma": rep.get("codigo_turma"), 
                     "status": rep.get("status", "Agendada"),
                     "extendedProps": {
                         "conteudo": rep.get("conteudo_aula"), 
-                        "status": rep.get("status", "Agendada")
+                        "status": rep.get("status", "Agendada"),
+                        "id_criador": rep.get("criado_por")
                     }
                 })
         return eventos
     except Exception as e: 
-        logger.error(f"Erro agenda: {str(e)}")
+        logger.error(f"Erro ao carregar agenda: {str(e)}")
         return []
-
+        
 @router.put("/reposicao-completa/{id_repo}")
 def atualizar_reposicao_completa(id_repo: str, presenca: str = Form(...), observacoes: str = Form(None), arquivo: UploadFile = File(None), authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
