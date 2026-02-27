@@ -30,7 +30,10 @@ from app.modelos import (
     MensagemDiretaData,
     MensagemGrupoData,
     LoginData,
-    NovoUsuarioData
+    NovoUsuarioData,
+    ItemChamada,
+    AulaExperimentalCreate,
+    AulaExperimentalUpdate
 )
 
 # Logger
@@ -61,39 +64,6 @@ MAPA_CURSOS = {
     "DESIGNER START": "designer-start",
     "GAME DEV": "game-dev",
 }
-
-# --- MODELOS LOCAIS PARA EVITAR ERRO DE IMPORTAÇÃO ---
-class ItemChamada(BaseModel):
-    id_aluno: int
-    codigo_turma: str
-    data_aula: str
-    presenca: bool
-
-class AulaExperimentalCreate(BaseModel):
-    responsavel: Optional[str] = None
-    contato1: Optional[str] = None
-    contato2: Optional[str] = None
-    aluno: str
-    data_aula: str  # "YYYY-MM-DD"
-    horario: Optional[str] = None
-    curso: Optional[str] = None
-    origem: Optional[str] = None
-    id_vendedor: Optional[int] = None  # FK tb_colaboradores.id_colaborador
-    status_atendimento: Optional[str] = None
-    observacao: Optional[str] = None
-
-class AulaExperimentalUpdate(BaseModel):
-    responsavel: Optional[str] = None
-    contato1: Optional[str] = None
-    contato2: Optional[str] = None
-    aluno: Optional[str] = None
-    data_aula: Optional[str] = None
-    horario: Optional[str] = None
-    curso: Optional[str] = None
-    origem: Optional[str] = None
-    id_vendedor: Optional[int] = None
-    status_atendimento: Optional[str] = None
-    observacao: Optional[str] = None
 
 # --- FUNÇÕES AUXILIARES ---
 
