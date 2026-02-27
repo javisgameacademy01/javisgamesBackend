@@ -832,40 +832,44 @@ def admin_agenda(authorization: str = Header(None)):
     try:
         eventos = []
         
-        # BUSCA TUDO SEM FILTRO DE UNIDADE
-        resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").execute()
+        # BUSCA FLEXÍVEL: Usamos o !left para garantir que a reposição apareça mesmo sem vínculo perfeito
+        resp_repo = supabase.table("tb_reposicoes")\
+            .select("*, tb_alunos!left(nome_completo), tb_colaboradores!left(nome_completo)")\
+            .execute()
 
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
-                nome_aluno = rep["tb_alunos"].get("nome_completo", "?") if rep.get("tb_alunos") else "?"
-                nome_prof = rep["tb_colaboradores"].get("nome_completo", "?") if rep.get("tb_colaboradores") else "?"
+                # Pega o nome do aluno do Join ou usa o backup da planilha (se houver)
+                nome_aluno = "Desconhecido"
+                if rep.get("tb_alunos"):
+                    nome_aluno = rep["tb_alunos"].get("nome_completo", "Desconhecido")
                 
-                # Cores no calendário: Verde se Concluída, Vermelho se Agendada
+                # Pega o nome do professor do Join ou usa a coluna de backup que criamos na importação
+                nome_prof = rep.get("professor_nome_kurzy") or "Sem Professor"
+                if rep.get("tb_colaboradores"):
+                    nome_prof = rep["tb_colaboradores"].get("nome_completo") or nome_prof
+
                 cor_evento = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
 
                 eventos.append({
                     "id": rep["id"], 
-                    "title": f"🔄 Reposição: {nome_aluno}", 
+                    "title": f"🔄 {nome_aluno}", 
                     "start": rep["data_reposicao"],
                     "color": cor_evento, 
                     "tipo": "reposicao", 
                     "nome_aluno": nome_aluno, 
                     "nome_prof": nome_prof,
                     "conteudo": rep.get("conteudo_aula"), 
-                    "turma": rep.get("codigo_turma"), 
-                    "presenca": rep.get("presenca"),
-                    "observacoes": rep.get("observacoes"), 
-                    "arquivo": rep.get("arquivo_assinatura"),
-                    "status": rep.get("status", "Agendada"), # AGORA O STATUS VAI PRO SITE!
+                    "turma": rep.get("codigo_turma") or rep.get("disciplina_kurzy"), 
+                    "status": rep.get("status", "Agendada"),
                     "extendedProps": {
                         "conteudo": rep.get("conteudo_aula"), 
-                        "id_criador": rep.get("criado_por"),
                         "status": rep.get("status", "Agendada")
                     }
                 })
         return eventos
     except Exception as e: 
-        print(f"Erro agenda: {e}")
+        logger.error(f"Erro agenda: {str(e)}")
         return []
 
 @router.put("/reposicao-completa/{id_repo}")
