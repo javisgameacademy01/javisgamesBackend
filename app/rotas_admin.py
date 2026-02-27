@@ -1069,10 +1069,13 @@ def admin_listar_turmas(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
     try:
-        query = supabase.table("tb_turmas").select("*")
-        if ctx['nivel'] < 9: query = query.eq("id_unidade", ctx['id_unidade'])
+        # Garante que selecionamos as colunas necessárias para a formatação 
+        query = supabase.table("tb_turmas").select("codigo_turma, nome_curso, dia_semana, horario")
+        if ctx['nivel'] < 9: 
+            query = query.eq("id_unidade", ctx['id_unidade'])
         return query.execute().data
-    except: return []
+    except: 
+        return []
 
 
 @router.get("/listar-professores")
