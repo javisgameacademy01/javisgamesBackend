@@ -2250,6 +2250,7 @@ async def salvar_chamada_foto(
     except Exception as e:
         logger.error(f"Erro salvamento v3: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+        
 @router.post("/reposicao/finalizar")
 async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(None)):
     # 1. Busca os dados da reposição
@@ -2270,4 +2271,31 @@ async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(Non
 
     return {"message": "Reposição concluída e falta convertida em presença por reposição (R)"}
 
+@router.post("/reposicao/concluir-e-converter")
+async def concluir_reposicao(id_repo: int, authorization: str = Header(None)):
+    ctx = obter_dados_token(authorization)
+    
+    try:
+        # 1. Busca os dados da reposição agendada
+        rep = supabase.table("tb_reposicoes").select("*").eq("id", id_repo).single().execute()
+        if not rep.data:
+            raise HTTPException(status_code=404, detail="Reposição não encontrada")
+        
+        dados_rep = rep.data
+        id_aluno = dados_rep['id_aluno']
+        # Precisamos da data original da falta que está sendo reposta
+        data_falta = dados_rep.get('data_falta_original') 
 
+        # 2. Atualiza a reposição para concluída
+        supabase.table("tb_reposicoes").update({"status": "Concluída"}).eq("id", id_repo).execute()
+
+        # 3. LÓGICA DE OURO: Localiza a falta na tb_chamadas e muda para 'R' (Reposição)
+        if data_falta:
+            supabase.table("tb_chamadas").update({"status_presenca": "R"})\
+                .eq("id_aluno", id_aluno)\
+                .eq("data_aula", data_falta)\
+                .execute()
+
+        return {"status": "success", "message": "Falta convertida em Reposição (R) com sucesso."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
