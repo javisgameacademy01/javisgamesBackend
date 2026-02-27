@@ -830,47 +830,38 @@ def admin_agenda(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
     try:
-        eventos = []
-        
-        # CORREÇÃO AQUI: Especificamos a chave estrangeira (fkey) id_professor
-        # Usamos o alias "professor" para facilitar o acesso aos dados
+        # Buscamos TUDO. Sem filtro de status para garantir a visão geral.
+        # Usamos o fkey explícita para evitar o erro de ambiguidade (Multiple Choices)
         resp_repo = supabase.table("tb_reposicoes")\
             .select("*, tb_alunos!left(nome_completo), professor:tb_colaboradores!tb_reposicoes_id_professor_fkey!left(nome_completo)")\
             .execute()
 
-        if resp_repo and resp_repo.data:
+        eventos = []
+        if resp_repo.data:
             for rep in resp_repo.data:
-                # Aluno: Pega do Join ou mantém Desconhecido
                 nome_aluno = rep.get("tb_alunos", {}).get("nome_completo") if rep.get("tb_alunos") else "Aluno Desconhecido"
                 
-                # Professor: Pega do novo alias "professor" ou usa o backup da planilha
+                # Se o join falhar, usamos o backup 'professor_nome_kurzy' da planilha
                 nome_prof = rep.get("professor_nome_kurzy") or "Sem Professor"
                 if rep.get("professor"):
                     nome_prof = rep["professor"].get("nome_completo") or nome_prof
 
-                cor_evento = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
+                cor = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
 
                 eventos.append({
                     "id": rep["id"], 
-                    "title": f"🔄 {nome_aluno}", 
+                    "title": f"{nome_aluno}", 
                     "start": rep["data_reposicao"],
-                    "color": cor_evento, 
-                    "tipo": "reposicao", 
-                    "nome_aluno": nome_aluno, 
+                    "color": cor, 
+                    "tipo": "reposicao",
+                    "nome_aluno": nome_aluno,
                     "nome_prof": nome_prof,
-                    "conteudo": rep.get("conteudo_aula"), 
-                    "turma": rep.get("codigo_turma"), 
                     "status": rep.get("status", "Agendada"),
-                    "extendedProps": {
-                        "conteudo": rep.get("conteudo_aula"), 
-                        "status": rep.get("status", "Agendada"),
-                        "id_criador": rep.get("criado_por")
-                    }
+                    "extendedProps": { "status": rep.get("status", "Agendada") }
                 })
         return eventos
-    except Exception as e: 
-        # O log agora vai mostrar o erro exato caso algo mude
-        print(f"Erro detalhado na agenda: {str(e)}")
+    except Exception as e:
+        print(f"Erro na Agenda: {e}")
         return []
         
 @router.put("/reposicao-completa/{id_repo}")
@@ -926,7 +917,7 @@ async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(Non
     return {"message": "Concluída e convertida (R)"}
 
 @router.post("/reposicao/concluir-e-converter")
-async def concluir_reposicao(id_repo: int, authorization: str = Header(None)):
+async def concluir_reposicao(id_repo: str, authorization: str = Header(None)):
     ctx = obter_dados_token(authorization)
     try:
         rep = supabase.table("tb_reposicoes").select("*").eq("id", id_repo).single().execute()
