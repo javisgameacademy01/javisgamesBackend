@@ -920,8 +920,10 @@ async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(Non
 async def concluir_reposicao(id_repo: str, authorization: str = Header(None)):
     ctx = obter_dados_token(authorization)
     try:
-        rep = supabase.table("tb_reposicoes").select("*").eq("id", id_repo).single().execute()
-        if not rep.data: raise HTTPException(status_code=404)
+        resp = supabase.table("tb_reposicoes").select("*").eq("id", id_repo).execute()
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="Reposição não encontrada")
+        repo = resp.data[0]
         dados_rep = rep.data
         supabase.table("tb_reposicoes").update({"status": "Concluída"}).eq("id", id_repo).execute()
         if dados_rep.get('data_falta_original'):
