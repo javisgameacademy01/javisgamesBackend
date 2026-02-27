@@ -2250,4 +2250,24 @@ async def salvar_chamada_foto(
     except Exception as e:
         logger.error(f"Erro salvamento v3: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+@router.post("/reposicao/finalizar")
+async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(None)):
+    # 1. Busca os dados da reposição
+    rep = supabase.table("tb_reposicoes").select("*").eq("id", id_reposicao).single().execute()
+    if not rep.data:
+        raise HTTPException(status_code=404, detail="Reposição não encontrada")
+    
+    dados = rep.data
+    
+    # 2. Atualiza o status da reposição para 'Concluída'
+    supabase.table("tb_reposicoes").update({"status": "Concluída"}).eq("id", id_reposicao).execute()
+
+    # 3. LÓGICA PRINCIPAL: Localiza a falta na tb_chamadas e muda para 'R' (Reposição)
+    # Filtramos pelo aluno e pela data da aula que ele faltou
+    supabase.table("tb_chamadas").update({
+        "status_presenca": "R"
+    }).eq("id_aluno", dados['id_aluno']).eq("data_aula", dados['data_falta']).execute()
+
+    return {"message": "Reposição concluída e falta convertida em presença por reposição (R)"}
+
 
