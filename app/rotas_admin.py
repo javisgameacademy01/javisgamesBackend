@@ -832,20 +832,20 @@ def admin_agenda(authorization: str = Header(None)):
     try:
         eventos = []
         
-        # BUSCA FORÇADA: Ignora nível de acesso e unidade. Traz TUDO do banco.
+        # BUSCA TUDO SEM FILTRO DE UNIDADE
         resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").execute()
 
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
-                nome_aluno = rep["tb_alunos"].get("nome_completo", "Desconhecido") if rep.get("tb_alunos") else "Desconhecido"
-                nome_prof = rep["tb_colaboradores"].get("nome_completo", "Sem Prof") if rep.get("tb_colaboradores") else "Sem Prof"
+                nome_aluno = rep["tb_alunos"].get("nome_completo", "?") if rep.get("tb_alunos") else "?"
+                nome_prof = rep["tb_colaboradores"].get("nome_completo", "?") if rep.get("tb_colaboradores") else "?"
                 
-                # Define a cor no calendário: Verde se concluída, Vermelho se agendada
+                # Cores no calendário: Verde se Concluída, Vermelho se Agendada
                 cor_evento = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
 
                 eventos.append({
                     "id": rep["id"], 
-                    "title": f"🔄 {rep.get('status', 'Agendada')}: {nome_aluno}", 
+                    "title": f"🔄 Reposição: {nome_aluno}", 
                     "start": rep["data_reposicao"],
                     "color": cor_evento, 
                     "tipo": "reposicao", 
@@ -856,7 +856,7 @@ def admin_agenda(authorization: str = Header(None)):
                     "presenca": rep.get("presenca"),
                     "observacoes": rep.get("observacoes"), 
                     "arquivo": rep.get("arquivo_assinatura"),
-                    "status": rep.get("status", "Agendada"), # Campo vital para o frontend
+                    "status": rep.get("status", "Agendada"), # AGORA O STATUS VAI PRO SITE!
                     "extendedProps": {
                         "conteudo": rep.get("conteudo_aula"), 
                         "id_criador": rep.get("criado_por"),
