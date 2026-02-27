@@ -1401,3 +1401,18 @@ async def salvar_chamada_foto(
         logger.error(f"ERRO CRÍTICO ao salvar: {str(e)}", exc_info=True)
         if "Bucket not found" in str(e): raise HTTPException(status_code=404, detail="Bucket não encontrado.")
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+
+@router.get("/listar-professores")
+def admin_listar_professores(authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+    try:
+        # Busca funcionários com cargo de Professor (6) ou Coordenador (4)
+        query = supabase.table("tb_colaboradores").select("id_colaborador, nome_completo").in_("id_cargo", [6, 4])
+        if ctx['nivel'] < 9: 
+            query = query.eq("id_unidade", ctx['id_unidade'])
+        return query.execute().data
+    except: 
+        return []
