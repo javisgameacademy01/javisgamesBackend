@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Qu
 from pydantic import BaseModel
 from supabase import create_client, Client
 from datetime import datetime, timedelta
+import json
 import requests
 import logging
 from typing import Optional, List
@@ -2205,3 +2206,50 @@ def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = He
     except Exception as e:
         logger.error(f"Erro ao salvar chamada v2: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chamada/salvar-v3")
+async def salvar_chamada_foto(
+    codigo_turma: str = Form(...),
+    data_aula: str = Form(...),
+    lista_alunos: str = Form(...), # Recebido como string JSON do FormData
+    arquivo_foto: UploadFile = File(...),
+    authorization: str = Header(None)
+):
+    ctx = obter_dados_token(authorization)
+    id_prof = ctx.get("id_colaborador")
+    lista_alunos_obj = json.loads(lista_alunos)
+
+    try:
+        # 1. Upload da Foto para o Supabase Storage
+        file_content = await arquivo_foto.read()
+        file_ext = arquivo_foto.filename.split('.')[-1]
+        # Nome do arquivo: TURMA_DATA.jpg
+        file_path = f"chamadas/{codigo_turma}_{data_aula}.{file_ext}"
+        
+        supabase.storage.from_("listas-chamada").upload(
+            file_path, 
+            file_content, 
+            file_options={"content-type": arquivo_foto.content_type, "upsert": "true"}
+        )
+        foto_url = supabase.storage.from_("listas-chamada").get_public_url(file_path)
+
+        # 2. Salvar registros na tb_chamadas
+        dados_insercao = []
+        for item in lista_alunos_obj:
+            dados_insercao.append({
+                "id_aluno": item["id_aluno"],
+                "codigo_turma": codigo_turma,
+                "data_aula": data_aula,
+                "id_professor": id_prof,
+                "presenca": item["presenca"],
+                "url_assinatura": foto_url # Nova coluna para a foto
+            })
+
+        supabase.table("tb_chamadas").insert(dados_insercao).execute()
+        return {"status": "success", "url_foto": foto_url}
+
+    except Exception as e:
+        logger.error(f"Erro ao salvar chamada com foto: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
