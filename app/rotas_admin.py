@@ -832,19 +832,36 @@ def admin_agenda(authorization: str = Header(None)):
     try:
         eventos = []
         
-        # --- BUSCA FORÇADA PARA VER TUDO ---
+        # BUSCA FORÇADA: Ignora nível de acesso e unidade. Traz TUDO do banco.
         resp_repo = supabase.table("tb_reposicoes").select("*, tb_alunos(nome_completo), tb_colaboradores(nome_completo)").execute()
 
         if resp_repo and resp_repo.data:
             for rep in resp_repo.data:
-                nome_aluno = rep["tb_alunos"].get("nome_completo", "?") if rep.get("tb_alunos") else "?"
-                nome_prof = rep["tb_colaboradores"].get("nome_completo", "?") if rep.get("tb_colaboradores") else "?"
+                nome_aluno = rep["tb_alunos"].get("nome_completo", "Desconhecido") if rep.get("tb_alunos") else "Desconhecido"
+                nome_prof = rep["tb_colaboradores"].get("nome_completo", "Sem Prof") if rep.get("tb_colaboradores") else "Sem Prof"
+                
+                # Define a cor no calendário: Verde se concluída, Vermelho se agendada
+                cor_evento = "#28a745" if rep.get("status") == "Concluída" else "#ff4d4d"
+
                 eventos.append({
-                    "id": rep["id"], "title": f"🔄 Reposição: {nome_aluno}", "start": rep["data_reposicao"],
-                    "color": "#ff4d4d", "tipo": "reposicao", "nome_aluno": nome_aluno, "nome_prof": nome_prof,
-                    "conteudo": rep.get("conteudo_aula"), "turma": rep.get("codigo_turma"), "presenca": rep.get("presenca"),
-                    "observacoes": rep.get("observacoes"), "arquivo": rep.get("arquivo_assinatura"),
-                    "extendedProps": {"conteudo": rep.get("conteudo_aula"), "id_criador": rep.get("criado_por")}
+                    "id": rep["id"], 
+                    "title": f"🔄 {rep.get('status', 'Agendada')}: {nome_aluno}", 
+                    "start": rep["data_reposicao"],
+                    "color": cor_evento, 
+                    "tipo": "reposicao", 
+                    "nome_aluno": nome_aluno, 
+                    "nome_prof": nome_prof,
+                    "conteudo": rep.get("conteudo_aula"), 
+                    "turma": rep.get("codigo_turma"), 
+                    "presenca": rep.get("presenca"),
+                    "observacoes": rep.get("observacoes"), 
+                    "arquivo": rep.get("arquivo_assinatura"),
+                    "status": rep.get("status", "Agendada"), # Campo vital para o frontend
+                    "extendedProps": {
+                        "conteudo": rep.get("conteudo_aula"), 
+                        "id_criador": rep.get("criado_por"),
+                        "status": rep.get("status", "Agendada")
+                    }
                 })
         return eventos
     except Exception as e: 
