@@ -2211,7 +2211,7 @@ def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = He
 async def salvar_chamada_foto(
     codigo_turma: str = Form(...),
     data_aula: str = Form(...),
-    lista_alunos: str = Form(...), # Recebido como string JSON do FormData
+    lista_alunos: str = Form(...),
     arquivo_foto: UploadFile = File(...),
     authorization: str = Header(None)
 ):
@@ -2220,10 +2220,9 @@ async def salvar_chamada_foto(
     lista_alunos_obj = json.loads(lista_alunos)
 
     try:
-        # 1. Upload da Foto para o Supabase Storage
+        # 1. Upload para o Supabase Storage (Bucket 'listas-chamada')
         file_content = await arquivo_foto.read()
         file_ext = arquivo_foto.filename.split('.')[-1]
-        # Nome do arquivo: TURMA_DATA.jpg
         file_path = f"chamadas/{codigo_turma}_{data_aula}.{file_ext}"
         
         supabase.storage.from_("listas-chamada").upload(
@@ -2233,7 +2232,7 @@ async def salvar_chamada_foto(
         )
         foto_url = supabase.storage.from_("listas-chamada").get_public_url(file_path)
 
-        # 2. Salvar registros na tb_chamadas
+        # 2. Salvar registros na tb_chamadas com o link da imagem
         dados_insercao = []
         for item in lista_alunos_obj:
             dados_insercao.append({
@@ -2242,14 +2241,13 @@ async def salvar_chamada_foto(
                 "data_aula": data_aula,
                 "id_professor": id_prof,
                 "presenca": item["presenca"],
-                "url_assinatura": foto_url # Nova coluna para a foto
+                "url_assinatura": foto_url 
             })
 
         supabase.table("tb_chamadas").insert(dados_insercao).execute()
         return {"status": "success", "url_foto": foto_url}
 
     except Exception as e:
-        logger.error(f"Erro ao salvar chamada com foto: {e}")
+        logger.error(f"Erro salvamento v3: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
