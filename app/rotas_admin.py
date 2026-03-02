@@ -391,7 +391,7 @@ def admin_salvar_turma(dados: TurmaData, authorization: str = Header(None)):
             "tipo_turma": dados.tipo,
             "data_inicio": dados.data_inicio,
             "qtd_aulas": dados.qtd_aulas,
-            "previsao_termino": previsao,
+            "data_termino_real": previsao,
             "data_termino_real": dados.data_termino_real,
             "id_unidade": ctx['id_unidade']
         }).execute()
@@ -414,7 +414,7 @@ def admin_editar_turma(codigo_original: str, dados: TurmaData, authorization: st
             "tipo_turma": dados.tipo,
             "data_inicio": dados.data_inicio,
             "qtd_aulas": dados.qtd_aulas,
-            "previsao_termino": previsao,
+            "data_termino_real": previsao,
             "data_termino_real": dados.data_termino_real
         }).eq("codigo_turma", codigo_original).execute()
         return {"message": "Turma atualizada!"}
