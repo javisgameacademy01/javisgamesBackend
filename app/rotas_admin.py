@@ -1312,8 +1312,8 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         raise HTTPException(status_code=401)
     
     try:
-        # 1. Iniciamos a consulta. O filtro .not_.is_("professor", "null") já remove grande parte do lixo
-        query = supabase.table("vw_frequencia_dashboard").select("*").not_.is_("professor", "null")
+        # 1. CORREÇÃO DO FILTRO: Usamos o nome da coluna definida na VIEW (nome_professor_atual)
+        query = supabase.table("vw_frequencia_dashboard").select("*").not_.is_("nome_professor_atual", "null")
         
         if data_inicio: 
             query = query.gte("data_aula", data_inicio)
@@ -1322,7 +1322,6 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             
         dados_raw = query.execute().data or []
         
-        # Estrutura inicial de retorno
         stats = {
             "global": {"presencas": 0, "faltas": 0, "assiduidade": 0}, 
             "por_curso": {}, 
@@ -1333,55 +1332,45 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         }
 
         for item in dados_raw:
+            # 2. MAPEAMENTO DE NOMES DA VIEW:
+            # Ajustamos para os nomes exatos retornados pelo SQL Join
             status = item.get('status')
-            prof = item.get('professor')
-            
-            # FILTRO DE SEGURANÇA: Se o professor for um traço (---) ou nomes genéricos, descartamos do cálculo
-            if not prof or prof.strip() in ['', '---', 'Sem Professor', 'Não Definido', 'A definir', 'null']:
-                continue
-
-            # Extração dos dados para os agrupamentos
+            prof = item.get('nome_professor_atual') or 'Sem Professor'
             curso = item.get('curso') or 'Não Definido'
-            turma = item.get('turma') or 'Sem Turma'
+            turma = item.get('codigo_turma') or 'Sem Turma'
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
-            nome_aluno = item.get('nome')
+            nome_aluno = item.get('nome_aluno')
 
-            # 2. Contabilização Global (Apenas turmas com professor real)
+            # 3. Contabilização
             if status == 'P': 
                 stats["global"]["presencas"] += 1
             elif status == 'F': 
                 stats["global"]["faltas"] += 1
 
-            # 3. Distribuição nos Gráficos
             for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes), ("por_professor", prof)]:
                 if chave not in stats[cat]: 
                     stats[cat][chave] = {"P": 0, "F": 0}
                 if status in ["P", "F"]: 
                     stats[cat][chave][status] += 1
 
-            # 4. Lista de Alunos Críticos (Filtrada)
             if status == 'F' and nome_aluno:
                 if nome_aluno not in stats["alunos_criticos"]: 
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        # 5. Recálculo Final da Assiduidade Geral
+        # 4. Cálculo de Assiduidade
         total = stats["global"]["presencas"] + stats["global"]["faltas"]
         if total > 0: 
             stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
 
-        # 6. Formatação e ordenação dos alunos com mais faltas
-        lista_criticos = [
-            {"nome": k, "faltas": v["faltas"], "turma": v["turma"]} 
-            for k, v in stats["alunos_criticos"].items()
-        ]
+        lista_criticos = [{"nome": k, "faltas": v["faltas"], "turma": v["turma"]} for k, v in stats["alunos_criticos"].items()]
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
         
     except Exception as e: 
         logger.error(f"Erro no processamento do dashboard: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro de sincronia com a View: {str(e)}")
 
 
 # =========================================
