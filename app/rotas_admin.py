@@ -1312,7 +1312,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         raise HTTPException(status_code=401)
     
     try:
-        # 1. Iniciamos a consulta filtrando por data e já removendo professores NULOS da consulta
+        # 1. Iniciamos a consulta. O filtro .not_.is_("professor", "null") já remove grande parte do lixo
         query = supabase.table("tb_frequencia_eventos").select("*").not_.is_("professor", "null")
         
         if data_inicio: 
@@ -1322,7 +1322,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             
         dados_raw = query.execute().data or []
         
-        # Inicialização da estrutura de estatísticas
+        # Estrutura inicial de retorno
         stats = {
             "global": {"presencas": 0, "faltas": 0, "assiduidade": 0}, 
             "por_curso": {}, 
@@ -1333,51 +1333,44 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         }
 
         for item in dados_raw:
-            # 2. Extração segura dos campos
             status = item.get('status')
             prof = item.get('professor')
             
-            # FILTRO CRÍTICO: Se não houver professor definido no registo, ignoramos para o cálculo
-            if not prof or prof in ['Sem Professor', 'Não Definido', 'A definir']:
+            # FILTRO DE SEGURANÇA: Se o professor for um traço (---) ou nomes genéricos, descartamos do cálculo
+            if not prof or prof.strip() in ['', '---', 'Sem Professor', 'Não Definido', 'A definir', 'null']:
                 continue
 
+            # Extração dos dados para os agrupamentos
             curso = item.get('curso') or 'Não Definido'
             turma = item.get('turma') or 'Sem Turma'
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
             nome_aluno = item.get('nome')
 
-            # 3. Contabilização Global (Apenas para turmas com professor)
+            # 2. Contabilização Global (Apenas turmas com professor real)
             if status == 'P': 
                 stats["global"]["presencas"] += 1
             elif status == 'F': 
                 stats["global"]["faltas"] += 1
 
-            # 4. Agrupamentos por categoria
-            categorias = [
-                ("por_curso", curso), 
-                ("por_turma", turma), 
-                ("por_mes", mes), 
-                ("por_professor", prof)
-            ]
-            
-            for cat, chave in categorias:
+            # 3. Distribuição nos Gráficos
+            for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes), ("por_professor", prof)]:
                 if chave not in stats[cat]: 
                     stats[cat][chave] = {"P": 0, "F": 0}
                 if status in ["P", "F"]: 
                     stats[cat][chave][status] += 1
 
-            # 5. Mapeamento de Alunos Críticos (Apenas turmas com professor)
+            # 4. Lista de Alunos Críticos (Filtrada)
             if status == 'F' and nome_aluno:
                 if nome_aluno not in stats["alunos_criticos"]: 
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        # 6. Cálculo Final de Assiduidade Global
+        # 5. Recálculo Final da Assiduidade Geral
         total = stats["global"]["presencas"] + stats["global"]["faltas"]
         if total > 0: 
             stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
 
-        # 7. Formatação da lista de alunos críticos
+        # 6. Formatação e ordenação dos alunos com mais faltas
         lista_criticos = [
             {"nome": k, "faltas": v["faltas"], "turma": v["turma"]} 
             for k, v in stats["alunos_criticos"].items()
@@ -1387,8 +1380,8 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         return stats
         
     except Exception as e: 
-        logger.error(f"Erro no dashboard unificado: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erro interno ao processar estatísticas: {str(e)}")
+        logger.error(f"Erro no processamento do dashboard: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 # =========================================
