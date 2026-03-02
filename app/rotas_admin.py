@@ -1302,32 +1302,24 @@ def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header
 
 @router.get("/dashboard-frequencia-unificado")
 def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, authorization: str = Header(None)):
-    if not authorization: 
-        raise HTTPException(status_code=401)
+    if not authorization: raise HTTPException(status_code=401)
     
     try:
-        # CORREÇÃO CRÍTICA: O filtro deve usar 'nome_professor_atual'
-        # O erro 500 acontece porque o Render tentou buscar 'professor=not.is.null'
+        # Busca dados na VIEW (já filtrando turmas sem professor para manter o rendimento limpo)
         query = supabase.table("vw_frequencia_dashboard").select("*").not_.is_("nome_professor_atual", "null")
         
-        if data_inicio: 
-            query = query.gte("data_aula", data_inicio)
-        if data_fim: 
-            query = query.lte("data_aula", data_fim)
+        if data_inicio: query = query.gte("data_aula", data_inicio)
+        if data_fim: query = query.lte("data_aula", data_fim)
             
         dados_raw = query.execute().data or []
         
+        # Adicionamos 'reposicoes' ao objeto global
         stats = {
-            "global": {"presencas": 0, "faltas": 0, "assiduidade": 0}, 
-            "por_curso": {}, 
-            "por_turma": {}, 
-            "por_mes": {}, 
-            "por_professor": {}, 
-            "alunos_criticos": {}
+            "global": {"presencas": 0, "faltas": 0, "reposicoes": 0, "assiduidade": 0}, 
+            "por_curso": {}, "por_turma": {}, "por_mes": {}, "por_professor": {}, "alunos_criticos": {}
         }
 
         for item in dados_raw:
-            # MAPEAMENTO COMPATÍVEL COM A VIEW
             status = item.get('status')
             prof = item.get('nome_professor_atual') or 'Sem Professor'
             curso = item.get('curso') or 'Não Definido'
@@ -1335,15 +1327,19 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
             nome_aluno = item.get('nome_aluno')
 
+            # SEPARAÇÃO DE MÉTRICAS: P, F e R (Reposição)
             if status == 'P': 
                 stats["global"]["presencas"] += 1
             elif status == 'F': 
                 stats["global"]["faltas"] += 1
+            elif status == 'R': 
+                stats["global"]["reposicoes"] += 1
 
+            # Agrupamentos por categoria com suporte a Reposição
             for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes), ("por_professor", prof)]:
                 if chave not in stats[cat]: 
-                    stats[cat][chave] = {"P": 0, "F": 0}
-                if status in ["P", "F"]: 
+                    stats[cat][chave] = {"P": 0, "F": 0, "R": 0}
+                if status in ["P", "F", "R"]: 
                     stats[cat][chave][status] += 1
 
             if status == 'F' and nome_aluno:
@@ -1351,18 +1347,18 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        total = stats["global"]["presencas"] + stats["global"]["faltas"]
-        if total > 0: 
-            stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
+        # Assiduidade baseada apenas em Presenças Reais / (P + F)
+        total_aulas_normais = stats["global"]["presencas"] + stats["global"]["faltas"]
+        if total_aulas_normais > 0: 
+            stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total_aulas_normais * 100), 1)
 
         lista_criticos = [{"nome": k, "faltas": v["faltas"], "turma": v["turma"]} for k, v in stats["alunos_criticos"].items()]
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
-        
     except Exception as e: 
-        logger.error(f"Erro no processamento do dashboard: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erro de sincronia com a View: {str(e)}")
+        logger.error(f"Erro no dashboard: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =========================================
 # CHAMADAS
