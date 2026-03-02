@@ -1286,25 +1286,19 @@ def get_dashboard_stats(authorization: str = Header(None)):
         }
     except: return {}
 
-@router.get("/relatorio-frequencia-geral")
 def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
     try:
+        # CORREÇÃO: Usando a VIEW e o campo 'nome_aluno'
         query = supabase.table("vw_frequencia_dashboard").select("*")
-        if q: query = query.ilike("nome", f"%{q}%")
+        if q: 
+            query = query.ilike("nome_aluno", f"%{q}%") # Antes estava 'nome', que não existe na VIEW
         return query.order("data_aula", desc=True).limit(200).execute().data
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
-
-@router.patch("/frequencia-eventos/{id_registro}")
-def atualizar_frequencia_evento(id_registro: int, dados: dict, authorization: str = Header(None)):
-    if not authorization: raise HTTPException(status_code=401)
-    try:
-        resp = supabase.table("tb_frequencia_eventos").update(dados).eq("id", id_registro).execute()
-        if not resp.data: raise HTTPException(status_code=404, detail="Não encontrado")
-        return {"status": "success", "data": resp.data}
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e: 
+        logger.error(f"Erro no relatório: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard-frequencia-unificado")
 def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, authorization: str = Header(None)):
@@ -1312,7 +1306,8 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         raise HTTPException(status_code=401)
     
     try:
-        # 1. CORREÇÃO DO FILTRO: Usamos o nome da coluna definida na VIEW (nome_professor_atual)
+        # CORREÇÃO CRÍTICA: O filtro deve usar 'nome_professor_atual'
+        # O erro 500 acontece porque o Render tentou buscar 'professor=not.is.null'
         query = supabase.table("vw_frequencia_dashboard").select("*").not_.is_("nome_professor_atual", "null")
         
         if data_inicio: 
@@ -1332,8 +1327,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
         }
 
         for item in dados_raw:
-            # 2. MAPEAMENTO DE NOMES DA VIEW:
-            # Ajustamos para os nomes exatos retornados pelo SQL Join
+            # MAPEAMENTO COMPATÍVEL COM A VIEW
             status = item.get('status')
             prof = item.get('nome_professor_atual') or 'Sem Professor'
             curso = item.get('curso') or 'Não Definido'
@@ -1341,7 +1335,6 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
             nome_aluno = item.get('nome_aluno')
 
-            # 3. Contabilização
             if status == 'P': 
                 stats["global"]["presencas"] += 1
             elif status == 'F': 
@@ -1358,7 +1351,6 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
-        # 4. Cálculo de Assiduidade
         total = stats["global"]["presencas"] + stats["global"]["faltas"]
         if total > 0: 
             stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
@@ -1371,7 +1363,6 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
     except Exception as e: 
         logger.error(f"Erro no processamento do dashboard: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro de sincronia com a View: {str(e)}")
-
 
 # =========================================
 # CHAMADAS
