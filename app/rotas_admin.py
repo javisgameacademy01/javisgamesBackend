@@ -1292,7 +1292,7 @@ def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
     try:
-        query = supabase.table("tb_frequencia_eventos").select("*")
+        query = supabase.table("vw_frequencia_dashboard").select("*")
         if q: query = query.ilike("nome", f"%{q}%")
         return query.order("data_aula", desc=True).limit(200).execute().data
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
@@ -1313,7 +1313,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
     
     try:
         # 1. Iniciamos a consulta. O filtro .not_.is_("professor", "null") já remove grande parte do lixo
-        query = supabase.table("tb_frequencia_eventos").select("*").not_.is_("professor", "null")
+        query = supabase.table("vw_frequencia_dashboard").select("*").not_.is_("professor", "null")
         
         if data_inicio: 
             query = query.gte("data_aula", data_inicio)
