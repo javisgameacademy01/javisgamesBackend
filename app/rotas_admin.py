@@ -1308,39 +1308,87 @@ def atualizar_frequencia_evento(id_registro: int, dados: dict, authorization: st
 
 @router.get("/dashboard-frequencia-unificado")
 def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, authorization: str = Header(None)):
-    if not authorization: raise HTTPException(status_code=401)
+    if not authorization: 
+        raise HTTPException(status_code=401)
+    
     try:
-        query = supabase.table("tb_frequencia_eventos").select("*")
-        if data_inicio: query = query.gte("data_aula", data_inicio)
-        if data_fim: query = query.lte("data_aula", data_fim)
+        # 1. Iniciamos a consulta filtrando por data e já removendo professores NULOS da consulta
+        query = supabase.table("tb_frequencia_eventos").select("*").not_.is_("professor", "null")
+        
+        if data_inicio: 
+            query = query.gte("data_aula", data_inicio)
+        if data_fim: 
+            query = query.lte("data_aula", data_fim)
             
-        dados = query.execute().data or []
-        stats = {"global": {"presencas": 0, "faltas": 0, "assiduidade": 0}, "por_curso": {}, "por_turma": {}, "por_mes": {}, "por_professor": {}, "alunos_criticos": {}}
+        dados_raw = query.execute().data or []
+        
+        # Inicialização da estrutura de estatísticas
+        stats = {
+            "global": {"presencas": 0, "faltas": 0, "assiduidade": 0}, 
+            "por_curso": {}, 
+            "por_turma": {}, 
+            "por_mes": {}, 
+            "por_professor": {}, 
+            "alunos_criticos": {}
+        }
 
-        for item in dados:
-            status, curso, turma, prof = item.get('status'), item.get('curso') or 'Não Definido', item.get('turma') or 'Sem Turma', item.get('professor') or 'Sem Professor'
+        for item in dados_raw:
+            # 2. Extração segura dos campos
+            status = item.get('status')
+            prof = item.get('professor')
+            
+            # FILTRO CRÍTICO: Se não houver professor definido no registo, ignoramos para o cálculo
+            if not prof or prof in ['Sem Professor', 'Não Definido', 'A definir']:
+                continue
+
+            curso = item.get('curso') or 'Não Definido'
+            turma = item.get('turma') or 'Sem Turma'
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
             nome_aluno = item.get('nome')
 
-            if status == 'P': stats["global"]["presencas"] += 1
-            elif status == 'F': stats["global"]["faltas"] += 1
+            # 3. Contabilização Global (Apenas para turmas com professor)
+            if status == 'P': 
+                stats["global"]["presencas"] += 1
+            elif status == 'F': 
+                stats["global"]["faltas"] += 1
 
-            for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes), ("por_professor", prof)]:
-                if chave not in stats[cat]: stats[cat][chave] = {"P": 0, "F": 0}
-                if status in ["P", "F"]: stats[cat][chave][status] += 1
+            # 4. Agrupamentos por categoria
+            categorias = [
+                ("por_curso", curso), 
+                ("por_turma", turma), 
+                ("por_mes", mes), 
+                ("por_professor", prof)
+            ]
+            
+            for cat, chave in categorias:
+                if chave not in stats[cat]: 
+                    stats[cat][chave] = {"P": 0, "F": 0}
+                if status in ["P", "F"]: 
+                    stats[cat][chave][status] += 1
 
+            # 5. Mapeamento de Alunos Críticos (Apenas turmas com professor)
             if status == 'F' and nome_aluno:
-                if nome_aluno not in stats["alunos_criticos"]: stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
+                if nome_aluno not in stats["alunos_criticos"]: 
+                    stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += 1
 
+        # 6. Cálculo Final de Assiduidade Global
         total = stats["global"]["presencas"] + stats["global"]["faltas"]
-        if total > 0: stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
+        if total > 0: 
+            stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total * 100), 1)
 
-        lista_criticos = [{"nome": k, "faltas": v["faltas"], "turma": v["turma"]} for k, v in stats["alunos_criticos"].items()]
+        # 7. Formatação da lista de alunos críticos
+        lista_criticos = [
+            {"nome": k, "faltas": v["faltas"], "turma": v["turma"]} 
+            for k, v in stats["alunos_criticos"].items()
+        ]
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
         return stats
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        
+    except Exception as e: 
+        logger.error(f"Erro no dashboard unificado: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao processar estatísticas: {str(e)}")
 
 
 # =========================================
