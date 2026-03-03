@@ -2,7 +2,7 @@
 Rotas administrativas do sistema
 """
 import os
-from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query, BackgroundTasks
 from pydantic import BaseModel
 from supabase import create_client, Client
 from datetime import datetime, timedelta
@@ -1453,10 +1453,20 @@ def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = He
         return {"status": "success", "count": len(dados_chamada)}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
+def enviar_para_google_drive(codigo_turma, data_aula, file_content, file_ext, id_prof):
+    # Aqui vamos colocar a lógica de upload para o Drive (1 única vez)
+    # O servidor fará isso sozinho depois que o professor já recebeu a mensagem de sucesso.
+    print(f"Iniciando upload para o Google Drive da turma {codigo_turma}...")
+    pass
+
 @router.post("/chamada/salvar-v3")
 async def salvar_chamada_foto(
-    codigo_turma: str = Form(...), data_aula: str = Form(...), lista_alunos: str = Form(...),
-    arquivo_foto: UploadFile = File(...), authorization: str = Header(None)
+    background_tasks: BackgroundTasks, # <-- 1. Adicionamos a tarefa em segundo plano aqui
+    codigo_turma: str = Form(...), 
+    data_aula: str = Form(...), 
+    lista_alunos: str = Form(...),
+    arquivo_foto: UploadFile = File(...), 
+    authorization: str = Header(None)
 ):
     logger.info(f"Iniciando salvamento - Turma: {codigo_turma}, Data: {data_aula}")
     try:
@@ -1468,9 +1478,11 @@ async def salvar_chamada_foto(
         file_ext = arquivo_foto.filename.split('.')[-1]
         file_path = f"chamadas/{codigo_turma}_{data_aula}.{file_ext}"
         
+        # 1. Salva a foto no Storage do Supabase (Super rápido)
         supabase.storage.from_("listas-chamada").upload(file_path, file_content, file_options={"content-type": arquivo_foto.content_type, "upsert": "true"})
         foto_url = supabase.storage.from_("listas-chamada").get_public_url(file_path)
 
+        # 2. Prepara a lista de alunos
         dados_insercao = []
         for item in lista_alunos_obj:
             dados_insercao.append({
@@ -1478,9 +1490,17 @@ async def salvar_chamada_foto(
                 "id_professor": id_prof, "status_presenca": item["status_presenca"], "url_assinatura": foto_url 
             })
 
-        # O GATILHO DA BOMBA ESTÁ AQUI:
+        # 3. Insere todos os alunos no banco de uma vez (Super rápido)
+        # IMPORTANTE: Você precisará ir no Supabase e DESATIVAR a Trigger 'fn_enviar_foto_drive_javis' 
+        # para ela parar de causar o erro 500.
         supabase.table("tb_chamadas").insert(dados_insercao).execute()
+
+        # 4. O PULO DO GATO: Manda o arquivo para o Google Drive em segundo plano!
+        background_tasks.add_task(enviar_para_google_drive, codigo_turma, data_aula, file_content, file_ext, id_prof)
+
+        # 5. Responde para o app do professor imediatamente
         return {"status": "success", "url_foto": foto_url}
+    
     except Exception as e:
         logger.error(f"ERRO CRÍTICO ao salvar: {str(e)}", exc_info=True)
         if "Bucket not found" in str(e): raise HTTPException(status_code=404, detail="Bucket não encontrado.")
