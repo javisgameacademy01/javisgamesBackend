@@ -1253,7 +1253,7 @@ def get_dashboard_stats(authorization: str = Header(None)):
     ctx = get_contexto_usuario(token)
     
     try:
-        # 1. BUSCA DE LEADS (MANTIDO)
+        # 1. LEADS E CONVERSÃO
         q_leads = supabase.table("inscricoes").select("status", count="exact")
         if ctx['nivel'] < 9: q_leads = q_leads.eq("id_unidade", ctx['id_unidade'])
         leads_data = q_leads.execute().data or []
@@ -1262,7 +1262,8 @@ def get_dashboard_stats(authorization: str = Header(None)):
         total_leads = len(leads_data)
         taxa_conversao = (matriculados / total_leads * 100) if total_leads > 0 else 0
 
-        # 2. BUSCA DE TURMAS ATIVAS (MANTIDO CONFORME SUA LEGENDA)
+        # 2. TURMAS ATIVAS (EM ANDAMENTO + FECHADA)
+        # Ignora: Planejada (não iniciou) e Concluída (terminou)
         q_turmas = supabase.table("tb_turmas").select("status")
         if ctx['nivel'] < 9: q_turmas = q_turmas.eq("id_unidade", ctx['id_unidade'])
         turmas_data = q_turmas.execute().data or []
@@ -1270,10 +1271,18 @@ def get_dashboard_stats(authorization: str = Header(None)):
         status_ativos = ["EM ANDAMENTO", "FECHADA"]
         turmas_ativas = sum(1 for t in turmas_data if str(t.get('status', '')).strip().upper() in status_ativos)
 
-        # 3. LÓGICA DE SALDO DE REPOSIÇÕES (NOVA MÉTRICA)
-        # Buscamos o histórico para calcular: Faltas (F) - Reposições (R)
-        q_freq = supabase.table("tb_frequencia_eventos").select("status, quantidade_aulas")
-        if ctx['nivel'] < 9: q_freq = q_freq.eq("id_unidade", ctx['id_unidade']) # Se houver essa coluna
+        # 3. SALDO DE REPOSIÇÕES PENDENTES (FALTAS - REPOSIÇÕES) 2026
+        # Buscamos apenas o histórico de 2026 para o saldo ser atualizado
+        hoje = datetime.now()
+        inicio_ano = f"{hoje.year}-01-01"
+        
+        q_freq = supabase.table("tb_frequencia_eventos")\
+            .select("status, quantidade_aulas")\
+            .gte("data_aula", inicio_ano)
+        
+        # Se sua tabela de frequência tiver id_unidade, descomente a linha abaixo
+        # if ctx['nivel'] < 9: q_freq = q_freq.eq("id_unidade", ctx['id_unidade'])
+        
         freq_data = q_freq.execute().data or []
 
         total_faltas = 0
@@ -1281,16 +1290,15 @@ def get_dashboard_stats(authorization: str = Header(None)):
 
         for item in freq_data:
             status = item.get('status')
-            qtd = item.get('quantidade_aulas') or 1
+            qtd = item.get('quantidade_aulas') or 1 # Garante que nunca seja zero
             
             if status == 'F':
-                total_faltas += 1 # Cada falta registrada conta como 1 aula a repor
+                total_faltas += 1 # Cada registro de falta (F) conta como 1 aula devida
             elif status == 'R':
-                total_repostas += qtd # Soma o peso das aulas efetivamente repostas
+                total_repostas += qtd # Soma o peso real das aulas repostas (ex: 3)
 
-        # O saldo são as reposições que AINDA precisam ser feitas
-        # Garantimos que o saldo não seja negativo (caso o aluno reponha mais que faltou)
-        reposicoes_pendentes = max(0, total_faltas - total_repostas)
+        # O card de reposições agora mostra o que FALTA fazer (Dívida Pedagógica)
+        saldo_pendente = max(0, total_faltas - total_repostas)
 
         return {
             "leads": { 
@@ -1298,15 +1306,19 @@ def get_dashboard_stats(authorization: str = Header(None)):
                 "conversao": round(taxa_conversao, 1) 
             },
             "escola": { 
-                "total_alunos": total_leads, # Ou sua query de alunos
+                "total_alunos": len(leads_data), # Ou substitua pela query de tb_alunos
                 "turmas_ativas": turmas_ativas 
             },
-            "reposicoes": reposicoes_pendentes, # AGORA EXIBE O SALDO DE DÉBITO DE AULAS
+            "reposicoes": saldo_pendente, # Valor que seu chefe quer ver baixar
             "grafico_cursos": {} 
         }
     except Exception as e:
-        logger.error(f"Erro dash: {e}")
-        return {"reposicoes": 0, "escola": {"turmas_ativas": 0}}
+        logger.error(f"Erro ao calcular dashboard stats: {e}")
+        return {
+            "leads": {"total": 0, "conversao": 0},
+            "escola": {"total_alunos": 0, "turmas_ativas": 0},
+            "reposicoes": 0
+        }
 
 def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
