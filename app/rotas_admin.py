@@ -1253,35 +1253,31 @@ def get_dashboard_stats(authorization: str = Header(None)):
     ctx = get_contexto_usuario(token)
     
     try:
-        # 1. LEADS E CONVERSÃO
-        q_leads = supabase.table("inscricoes").select("status", count="exact")
-        if ctx['nivel'] < 9: q_leads = q_leads.eq("id_unidade", ctx['id_unidade'])
-        leads_data = q_leads.execute().data or []
-        
-        matriculados = sum(1 for l in leads_data if l.get('status') == 'Matriculado')
-        total_leads = len(leads_data)
-        taxa_conversao = (matriculados / total_leads * 100) if total_leads > 0 else 0
+        # 1. TOTAL DE ALUNOS (Busca real da tabela de alunos)
+        q_alunos = supabase.table("tb_alunos").select("id_aluno", count="exact")
+        if ctx['nivel'] < 9: 
+            q_alunos = q_alunos.eq("id_unidade", ctx['id_unidade'])
+        total_alunos = q_alunos.execute().count or 0
 
-        # 2. TURMAS ATIVAS (EM ANDAMENTO + FECHADA)
-        # Ignora: Planejada (não iniciou) e Concluída (terminou)
+        # 2. TURMAS ATIVAS (Conforme sua legenda)
+        # Ativas = Em Andamento + Fechada
         q_turmas = supabase.table("tb_turmas").select("status")
-        if ctx['nivel'] < 9: q_turmas = q_turmas.eq("id_unidade", ctx['id_unidade'])
+        if ctx['nivel'] < 9: 
+            q_turmas = q_turmas.eq("id_unidade", ctx['id_unidade'])
         turmas_data = q_turmas.execute().data or []
         
-        status_ativos = ["EM ANDAMENTO", "FECHADA"]
-        turmas_ativas = sum(1 for t in turmas_data if str(t.get('status', '')).strip().upper() in status_ativos)
+        # Filtro rigoroso com os nomes que você usa no banco
+        status_ativos = ["Em Andamento", "Fechada"]
+        turmas_ativas = sum(1 for t in turmas_data if t.get('status') in status_ativos)
 
-        # 3. SALDO DE REPOSIÇÕES PENDENTES (FALTAS - REPOSIÇÕES) 2026
-        # Buscamos apenas o histórico de 2026 para o saldo ser atualizado
+        # 3. SALDO DE REPOSIÇÕES (Dívida Pedagógica 2026)
+        # Saldo = Faltas - Reposições Realizadas
         hoje = datetime.now()
         inicio_ano = f"{hoje.year}-01-01"
         
         q_freq = supabase.table("tb_frequencia_eventos")\
             .select("status, quantidade_aulas")\
             .gte("data_aula", inicio_ano)
-        
-        # Se sua tabela de frequência tiver id_unidade, descomente a linha abaixo
-        # if ctx['nivel'] < 9: q_freq = q_freq.eq("id_unidade", ctx['id_unidade'])
         
         freq_data = q_freq.execute().data or []
 
@@ -1290,15 +1286,25 @@ def get_dashboard_stats(authorization: str = Header(None)):
 
         for item in freq_data:
             status = item.get('status')
-            qtd = item.get('quantidade_aulas') or 1 # Garante que nunca seja zero
+            qtd = item.get('quantidade_aulas') or 1
             
             if status == 'F':
-                total_faltas += 1 # Cada registro de falta (F) conta como 1 aula devida
+                total_faltas += 1 # Cada falta (F) gera 1 aula de débito
             elif status == 'R':
-                total_repostas += qtd # Soma o peso real das aulas repostas (ex: 3)
+                total_repostas += qtd # Cada reposição (R) abate o peso das aulas
 
-        # O card de reposições agora mostra o que FALTA fazer (Dívida Pedagógica)
-        saldo_pendente = max(0, total_faltas - total_repostas)
+        # Saldo pendente (não deixa ficar negativo)
+        reposicoes_pendentes = max(0, total_faltas - total_repostas)
+
+        # 4. LEADS E CONVERSÃO (Para o card de Marketing)
+        q_leads = supabase.table("inscricoes").select("status")
+        if ctx['nivel'] < 9: 
+            q_leads = q_leads.eq("id_unidade", ctx['id_unidade'])
+        leads_data = q_leads.execute().data or []
+        
+        total_leads = len(leads_data)
+        matriculados = sum(1 for l in leads_data if l.get('status') == 'Matriculado')
+        taxa_conversao = (matriculados / total_leads * 100) if total_leads > 0 else 0
 
         return {
             "leads": { 
@@ -1306,14 +1312,14 @@ def get_dashboard_stats(authorization: str = Header(None)):
                 "conversao": round(taxa_conversao, 1) 
             },
             "escola": { 
-                "total_alunos": len(leads_data), # Ou substitua pela query de tb_alunos
+                "total_alunos": total_alunos, # REATIVADO: Contagem real de alunos
                 "turmas_ativas": turmas_ativas 
             },
-            "reposicoes": saldo_pendente, # Valor que seu chefe quer ver baixar
+            "reposicoes": reposicoes_pendentes, # Card de Débito de Aulas
             "grafico_cursos": {} 
         }
     except Exception as e:
-        logger.error(f"Erro ao calcular dashboard stats: {e}")
+        logger.error(f"Erro ao carregar Dashboard Stats: {e}")
         return {
             "leads": {"total": 0, "conversao": 0},
             "escola": {"total_alunos": 0, "turmas_ativas": 0},
