@@ -1478,6 +1478,7 @@ async def salvar_chamada_foto(
                 "id_professor": id_prof, "status_presenca": item["status_presenca"], "url_assinatura": foto_url 
             })
 
+        # O GATILHO DA BOMBA ESTÁ AQUI:
         supabase.table("tb_chamadas").insert(dados_insercao).execute()
         return {"status": "success", "url_foto": foto_url}
     except Exception as e:
