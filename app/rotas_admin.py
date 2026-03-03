@@ -1251,10 +1251,12 @@ def get_dashboard_stats(authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
+    
     try:
+        # --- LÓGICA DE LEADS ---
         q_leads = supabase.table("inscricoes").select("status", count="exact")
         if ctx['nivel'] < 9: q_leads = q_leads.eq("id_unidade", ctx['id_unidade'])
-        leads_data = q_leads.execute().data
+        leads_data = q_leads.execute().data or []
         
         pendentes = sum(1 for l in leads_data if l.get('status') == 'Pendente')
         atendimento = sum(1 for l in leads_data if l.get('status') == 'Em Atendimento')
@@ -1263,28 +1265,61 @@ def get_dashboard_stats(authorization: str = Header(None)):
         total_leads = len(leads_data)
         taxa_conversao = (matriculados / total_leads * 100) if total_leads > 0 else 0
 
+        # --- LÓGICA DE ALUNOS ---
         q_alunos = supabase.table("tb_alunos").select("id_aluno", count="exact")
         if ctx['nivel'] < 9: q_alunos = q_alunos.eq("id_unidade", ctx['id_unidade'])
         total_alunos = q_alunos.execute().count
 
+        # --- LÓGICA DE TURMAS (CARD ATUALIZADO) ---
         q_turmas = supabase.table("tb_turmas").select("status, nome_curso")
         if ctx['nivel'] < 9: q_turmas = q_turmas.eq("id_unidade", ctx['id_unidade'])
-        turmas_data = q_turmas.execute().data
+        turmas_data = q_turmas.execute().data or []
         
-        turmas_ativas = sum(1 for t in turmas_data if t['status'] in ['Em Andamento', 'Fechada'])
+        # Filtro conforme sua legenda: Ativas = (Em Andamento + Fechada)
+        # Ignora: Planejamento (não iniciou) e Concluída (terminou)
+        status_ativos = ["EM ANDAMENTO", "FECHADA"]
+        
+        turmas_ativas = 0
         cursos_map = {}
+        
         for t in turmas_data:
-            nome = t.get('nome_curso', 'Outros')
-            cursos_map[nome] = cursos_map.get(nome, 0) + 1
+            # Padroniza o status para comparação (remove espaços e põe em maiúsculo)
+            status_limpo = str(t.get('status', '')).strip().upper()
+            
+            if status_limpo in status_ativos:
+                turmas_ativas += 1
+            
+            # Gráfico de pizza por curso
+            nome_curso = t.get('nome_curso', 'Outros')
+            cursos_map[nome_curso] = cursos_map.get(nome_curso, 0) + 1
 
+        # --- REPOSIÇÕES AGENDADAS ---
         repo_count = supabase.table("tb_reposicoes").select("id", count="exact").eq("status", "Agendada").execute().count
 
         return {
-            "leads": { "pendentes": pendentes, "atendimento": atendimento, "matriculados": matriculados, "perdidos": perdidos, "total": total_leads, "conversao": round(taxa_conversao, 1) },
-            "escola": { "total_alunos": total_alunos, "turmas_ativas": turmas_ativas },
-            "reposicoes": repo_count, "grafico_cursos": cursos_map
+            "leads": { 
+                "pendentes": pendentes, 
+                "atendimento": atendimento, 
+                "matriculados": matriculados, 
+                "perdidos": perdidos, 
+                "total": total_leads, 
+                "conversao": round(taxa_conversao, 1) 
+            },
+            "escola": { 
+                "total_alunos": total_alunos, 
+                "turmas_ativas": turmas_ativas # Este valor agora aparecerá no card
+            },
+            "reposicoes": repo_count, 
+            "grafico_cursos": cursos_map
         }
-    except: return {}
+    except Exception as e:
+        logger.error(f"Erro ao gerar estatísticas do dashboard: {e}")
+        return {
+            "leads": {"total": 0, "conversao": 0},
+            "escola": {"total_alunos": 0, "turmas_ativas": 0},
+            "reposicoes": 0,
+            "grafico_cursos": {}
+        }
 
 def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
