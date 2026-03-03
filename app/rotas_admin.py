@@ -1305,7 +1305,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
     if not authorization: raise HTTPException(status_code=401)
     
     try:
-        # Busca dados na VIEW (Certifique-se que a VIEW vw_frequencia_dashboard inclui a coluna quantidade_aulas)
+        # Busca dados na VIEW (Certifique-se que a coluna quantidade_aulas está na VIEW vw_frequencia_dashboard)
         query = supabase.table("vw_frequencia_dashboard").select("*").not_.is_("nome_professor_atual", "null")
         
         if data_inicio: query = query.gte("data_aula", data_inicio)
@@ -1313,7 +1313,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             
         dados_raw = query.execute().data or []
         
-        # Estrutura de estatísticas
+        # Estrutura inicial do Dashboard
         stats = {
             "global": {"presencas": 0, "faltas": 0, "reposicoes": 0, "assiduidade": 0}, 
             "por_curso": {}, "por_turma": {}, "por_mes": {}, "por_professor": {}, "alunos_criticos": {}
@@ -1327,15 +1327,15 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             mes = item.get('data_aula', '0000-00')[:7] if item.get('data_aula') else 'Sem Data'
             nome_aluno = item.get('nome_aluno')
 
-            # LÓGICA DE PESO DA AULA:
-            # Se status for 'R' (Reposição), usamos o valor da coluna quantidade_aulas.
-            # Se for 'P' ou 'F', o peso é sempre 1 conforme solicitado.
+            # --- LÓGICA DE SOMA PELO PESO DA AULA ---
+            # Se for Reposição, somamos a quantidade de aulas dadas.
+            # Se for Presença normal ou Falta, cada registro vale 1 aula.
             if status == 'R':
-                peso_aula = item.get('quantidade_aulas') or 1
+                peso_aula = item.get('quantidade_aulas') or 3 # Padrão 3 se vier nulo do banco
             else:
                 peso_aula = 1
 
-            # SEPARAÇÃO DE MÉTRICAS GLOBAIS
+            # Atualização dos Totais Globais
             if status == 'P': 
                 stats["global"]["presencas"] += peso_aula
             elif status == 'F': 
@@ -1343,7 +1343,7 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
             elif status == 'R': 
                 stats["global"]["reposicoes"] += peso_aula
 
-            # AGRUPAMENTOS POR CATEGORIA (Soma o peso em vez de contar +1)
+            # Atualização dos Agrupamentos (Gráficos por Professor, Turma, etc.)
             for cat, chave in [("por_curso", curso), ("por_turma", turma), ("por_mes", mes), ("por_professor", nome_prof)]:
                 if chave not in stats[cat]: 
                     stats[cat][chave] = {"P": 0, "F": 0, "R": 0}
@@ -1351,18 +1351,18 @@ def stats_frequencia_unificado(data_inicio: str = None, data_fim: str = None, au
                 if status in ["P", "F", "R"]: 
                     stats[cat][chave][status] += peso_aula
 
-            # ALUNOS CRÍTICOS (Soma o peso das faltas)
+            # Ranking de Alunos Críticos (Soma o peso das faltas)
             if status == 'F' and nome_aluno:
                 if nome_aluno not in stats["alunos_criticos"]: 
                     stats["alunos_criticos"][nome_aluno] = {"faltas": 0, "turma": turma}
                 stats["alunos_criticos"][nome_aluno]["faltas"] += peso_aula
 
-        # CÁLCULO DE ASSIDUIDADE (Presenças Reais / Total de Aulas Normais)
+        # Cálculo da Assiduidade (P / P+F) - Mantemos apenas aulas normais nesta métrica pedagógica
         total_aulas_normais = stats["global"]["presencas"] + stats["global"]["faltas"]
         if total_aulas_normais > 0: 
             stats["global"]["assiduidade"] = round((stats["global"]["presencas"] / total_aulas_normais * 100), 1)
 
-        # Formata lista de alunos críticos para o Dashboard
+        # Formatação final da lista de alunos críticos
         lista_criticos = [{"nome": k, "faltas": v["faltas"], "turma": v["turma"]} for k, v in stats["alunos_criticos"].items()]
         stats["alunos_criticos"] = sorted(lista_criticos, key=lambda x: x['faltas'], reverse=True)[:10]
 
