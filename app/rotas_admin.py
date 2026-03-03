@@ -1453,11 +1453,100 @@ def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = He
         return {"status": "success", "count": len(dados_chamada)}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-def enviar_para_google_drive(codigo_turma, data_aula, file_content, file_ext, id_prof):
-    # Aqui vamos colocar a lógica de upload para o Drive (1 única vez)
-    # O servidor fará isso sozinho depois que o professor já recebeu a mensagem de sucesso.
-    print(f"Iniciando upload para o Google Drive da turma {codigo_turma}...")
-    pass
+# --- FUNÇÃO ASSÍNCRONA PARA O GOOGLE DRIVE ---
+def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: bytes, file_ext: str, id_prof: int):
+    try:
+        print(f"[Drive] Iniciando upload em background para a turma {codigo_turma}...")
+        
+        # 1. Busca o nome do professor e o nome do curso
+        prof_resp = supabase.table("tb_colaboradores").select("nome_completo").eq("id_colaborador", id_prof).single().execute()
+        nome_prof = prof_resp.data.get("nome_completo", "").upper() if prof_resp.data else ""
+
+        turma_resp = supabase.table("tb_turmas").select("nome_curso").eq("codigo_turma", codigo_turma).single().execute()
+        nome_curso = turma_resp.data.get("nome_curso", "") if turma_resp.data else ""
+
+        # 2. Define a Pasta Raiz
+        root_id = None
+        if "BRENO" in nome_prof:
+            root_id = '1PONtYJQnm0iQ1N9xYRIuYbYHueHb5y6a'
+        elif "FELIPE" in nome_prof:
+            root_id = '1y9ar0CeQ0Nunw5B-ShOlDW6N66xy167k'
+        else:
+            print("[Drive] Professor não é Breno nem Felipe. Cancelando upload.")
+            return
+
+        # 3. Gera o Token do Google usando as Variáveis de Ambiente do Render
+        client_id = os.getenv("GDRIVE_CLIENT_ID")
+        client_secret = os.getenv("GDRIVE_CLIENT_SECRET")
+        refresh_token = os.getenv("GDRIVE_REFRESH_TOKEN")
+
+        token_res = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token"
+            }
+        ).json()
+        
+        access_token = token_res.get("access_token")
+        if not access_token:
+            print("[Drive] Falha ao gerar Access Token!")
+            return
+            
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        # Funções Auxiliares para o Drive
+        def buscar_pasta(nome, parent_id):
+            q = f"name='{nome}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            res = requests.get("https://www.googleapis.com/drive/v3/files", headers=headers, params={"q": q}).json()
+            return res.get("files", [])[0]["id"] if res.get("files") else None
+
+        def criar_pasta(nome, parent_id):
+            res = requests.post("https://www.googleapis.com/drive/v3/files", headers=headers, json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}).json()
+            return res.get("id")
+
+        # 4. Formata as Datas e Nomes (Padrão Breno vs Felipe)
+        dt_aula = datetime.strptime(data_aula, "%Y-%m-%d")
+        ano_str = dt_aula.strftime("%Y")
+        meses = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
+        mes_num = dt_aula.month
+        mes_nome = meses[mes_num]
+        
+        nome_pasta_turma = codigo_turma
+
+        if "BRENO" in nome_prof:
+            mes_nome = f"{mes_num:02d} {mes_nome}" # Ex: 03 MARÇO
+            nome_pasta_turma = f"{codigo_turma} {nome_curso}".strip() # Ex: 7002 GAME PRO
+
+        # 5. Navegação e Criação das Pastas (Rápido e seguro)
+        ano_id = buscar_pasta(ano_str, root_id) or criar_pasta(ano_str, root_id)
+        mes_id = buscar_pasta(mes_nome, ano_id) or criar_pasta(mes_nome, ano_id)
+        turma_id = buscar_pasta(nome_pasta_turma, mes_id) or criar_pasta(nome_pasta_turma, mes_id)
+
+        # 6. Upload do Arquivo
+        nome_arquivo = f"{dt_aula.strftime('%d-%m-%Y')} TURMA - {codigo_turma}.{file_ext}"
+        metadata = {"name": nome_arquivo, "parents": [turma_id]}
+        
+        files = {
+            'metadata': (None, json.dumps(metadata), 'application/json'),
+            'file': (nome_arquivo, file_content, f'image/{file_ext}')
+        }
+        
+        res_upload = requests.post(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+            headers=headers,
+            files=files
+        )
+        
+        if res_upload.status_code == 200:
+            print(f"[Drive] Sucesso! Arquivo salvo na turma {codigo_turma}.")
+        else:
+            print(f"[Drive] Erro no upload: {res_upload.text}")
+
+    except Exception as e:
+        print(f"[Drive] Erro fatal no background task: {e}")
 
 @router.post("/chamada/salvar-v3")
 async def salvar_chamada_foto(
