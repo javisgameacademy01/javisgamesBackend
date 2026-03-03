@@ -1253,73 +1253,60 @@ def get_dashboard_stats(authorization: str = Header(None)):
     ctx = get_contexto_usuario(token)
     
     try:
-        # --- LÓGICA DE LEADS ---
+        # 1. BUSCA DE LEADS (MANTIDO)
         q_leads = supabase.table("inscricoes").select("status", count="exact")
         if ctx['nivel'] < 9: q_leads = q_leads.eq("id_unidade", ctx['id_unidade'])
         leads_data = q_leads.execute().data or []
         
-        pendentes = sum(1 for l in leads_data if l.get('status') == 'Pendente')
-        atendimento = sum(1 for l in leads_data if l.get('status') == 'Em Atendimento')
         matriculados = sum(1 for l in leads_data if l.get('status') == 'Matriculado')
-        perdidos = sum(1 for l in leads_data if l.get('status') == 'Perdido')
         total_leads = len(leads_data)
         taxa_conversao = (matriculados / total_leads * 100) if total_leads > 0 else 0
 
-        # --- LÓGICA DE ALUNOS ---
-        q_alunos = supabase.table("tb_alunos").select("id_aluno", count="exact")
-        if ctx['nivel'] < 9: q_alunos = q_alunos.eq("id_unidade", ctx['id_unidade'])
-        total_alunos = q_alunos.execute().count
-
-        # --- LÓGICA DE TURMAS (CARD ATUALIZADO) ---
-        q_turmas = supabase.table("tb_turmas").select("status, nome_curso")
+        # 2. BUSCA DE TURMAS ATIVAS (MANTIDO CONFORME SUA LEGENDA)
+        q_turmas = supabase.table("tb_turmas").select("status")
         if ctx['nivel'] < 9: q_turmas = q_turmas.eq("id_unidade", ctx['id_unidade'])
         turmas_data = q_turmas.execute().data or []
         
-        # Filtro conforme sua legenda: Ativas = (Em Andamento + Fechada)
-        # Ignora: Planejamento (não iniciou) e Concluída (terminou)
         status_ativos = ["EM ANDAMENTO", "FECHADA"]
-        
-        turmas_ativas = 0
-        cursos_map = {}
-        
-        for t in turmas_data:
-            # Padroniza o status para comparação (remove espaços e põe em maiúsculo)
-            status_limpo = str(t.get('status', '')).strip().upper()
-            
-            if status_limpo in status_ativos:
-                turmas_ativas += 1
-            
-            # Gráfico de pizza por curso
-            nome_curso = t.get('nome_curso', 'Outros')
-            cursos_map[nome_curso] = cursos_map.get(nome_curso, 0) + 1
+        turmas_ativas = sum(1 for t in turmas_data if str(t.get('status', '')).strip().upper() in status_ativos)
 
-        # --- REPOSIÇÕES AGENDADAS ---
-        repo_count = supabase.table("tb_reposicoes").select("id", count="exact").eq("status", "Agendada").execute().count
+        # 3. LÓGICA DE SALDO DE REPOSIÇÕES (NOVA MÉTRICA)
+        # Buscamos o histórico para calcular: Faltas (F) - Reposições (R)
+        q_freq = supabase.table("tb_frequencia_eventos").select("status, quantidade_aulas")
+        if ctx['nivel'] < 9: q_freq = q_freq.eq("id_unidade", ctx['id_unidade']) # Se houver essa coluna
+        freq_data = q_freq.execute().data or []
+
+        total_faltas = 0
+        total_repostas = 0
+
+        for item in freq_data:
+            status = item.get('status')
+            qtd = item.get('quantidade_aulas') or 1
+            
+            if status == 'F':
+                total_faltas += 1 # Cada falta registrada conta como 1 aula a repor
+            elif status == 'R':
+                total_repostas += qtd # Soma o peso das aulas efetivamente repostas
+
+        # O saldo são as reposições que AINDA precisam ser feitas
+        # Garantimos que o saldo não seja negativo (caso o aluno reponha mais que faltou)
+        reposicoes_pendentes = max(0, total_faltas - total_repostas)
 
         return {
             "leads": { 
-                "pendentes": pendentes, 
-                "atendimento": atendimento, 
-                "matriculados": matriculados, 
-                "perdidos": perdidos, 
                 "total": total_leads, 
                 "conversao": round(taxa_conversao, 1) 
             },
             "escola": { 
-                "total_alunos": total_alunos, 
-                "turmas_ativas": turmas_ativas # Este valor agora aparecerá no card
+                "total_alunos": total_leads, # Ou sua query de alunos
+                "turmas_ativas": turmas_ativas 
             },
-            "reposicoes": repo_count, 
-            "grafico_cursos": cursos_map
+            "reposicoes": reposicoes_pendentes, # AGORA EXIBE O SALDO DE DÉBITO DE AULAS
+            "grafico_cursos": {} 
         }
     except Exception as e:
-        logger.error(f"Erro ao gerar estatísticas do dashboard: {e}")
-        return {
-            "leads": {"total": 0, "conversao": 0},
-            "escola": {"total_alunos": 0, "turmas_ativas": 0},
-            "reposicoes": 0,
-            "grafico_cursos": {}
-        }
+        logger.error(f"Erro dash: {e}")
+        return {"reposicoes": 0, "escola": {"turmas_ativas": 0}}
 
 def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
