@@ -1454,35 +1454,49 @@ def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = He
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 # --- FUNÇÃO ASSÍNCRONA PARA O GOOGLE DRIVE COM RASTREADORES ---
-def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: bytes, file_ext: str, id_prof: int):
+def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: bytes, file_ext: str, id_prof_logado: int):
     try:
         print(f"[Drive] 1. Iniciando upload em background para a turma {codigo_turma}...")
-        print(f"[Drive] 2. ID do Professor recebido: {id_prof}")
-
-        if not id_prof:
-            print("[Drive] ❌ ERRO: O ID do professor chegou vazio!")
-            return
-
-        print("[Drive] 3. Buscando nome do professor no Supabase...")
-        prof_resp = supabase.table("tb_colaboradores").select("nome_completo").eq("id_colaborador", id_prof).single().execute()
-        nome_prof = prof_resp.data.get("nome_completo", "").upper() if prof_resp.data else ""
-        print(f"[Drive] 4. Professor encontrado: {nome_prof}")
-
-        print("[Drive] 5. Buscando nome do curso...")
-        turma_resp = supabase.table("tb_turmas").select("nome_curso").eq("codigo_turma", codigo_turma).single().execute()
+        
+        # 1. Buscando o VERDADEIRO dono da turma (Professor da Turma)
+        print("[Drive] 2. Buscando quem é o professor dono desta turma...")
+        turma_resp = supabase.table("tb_turmas").select("nome_curso, id_professor").eq("codigo_turma", codigo_turma).single().execute()
+        
         nome_curso = turma_resp.data.get("nome_curso", "") if turma_resp.data else ""
-        print(f"[Drive] 6. Curso encontrado: {nome_curso}")
+        id_verdadeiro_prof = turma_resp.data.get("id_professor") if turma_resp.data else id_prof_logado
 
-        root_id = None
-        if "BRENO" in nome_prof:
-            root_id = '1PONtYJQnm0iQ1N9xYRIuYbYHueHb5y6a'
-        elif "FELIPE" in nome_prof:
-            root_id = '1y9ar0CeQ0Nunw5B-ShOlDW6N66xy167k'
-        else:
-            print(f"[Drive] ❌ Cancelado: O professor '{nome_prof}' não é Breno nem Felipe.")
+        if not id_verdadeiro_prof:
+            print("[Drive] ❌ ERRO: Não foi possível identificar o professor da turma!")
             return
 
-        print("[Drive] 7. Pegando credenciais do Render...")
+        # 2. Buscando o nome do professor da turma
+        prof_resp = supabase.table("tb_colaboradores").select("nome_completo").eq("id_colaborador", id_verdadeiro_prof).single().execute()
+        nome_prof = prof_resp.data.get("nome_completo", "").upper() if prof_resp.data else ""
+        print(f"[Drive] 3. Professor dono da turma encontrado: {nome_prof}")
+
+        # ==========================================================
+        # 🌟 DICIONÁRIO DE PASTAS DOS PROFESSORES NO GOOGLE DRIVE
+        # Adicione novos professores aqui quando precisar!
+        # ==========================================================
+        PASTAS_DOS_PROFESSORES = {
+            "BRENO": '1PONtYJQnm0iQ1N9xYRIuYbYHueHb5y6a',
+            "FELIPE": '1y9ar0CeQ0Nunw5B-ShOlDW6N66xy167k'
+            # "JOAO": 'coloque_o_id_da_pasta_do_joao_aqui',
+            # "MARCOS": 'coloque_o_id_da_pasta_aqui'
+        }
+
+        # 3. Descobrindo o ID da Pasta raiz baseado no nome do professor
+        root_id = None
+        for chave_nome, id_pasta in PASTAS_DOS_PROFESSORES.items():
+            if chave_nome in nome_prof:
+                root_id = id_pasta
+                break
+
+        if not root_id:
+            print(f"[Drive] ❌ Cancelado: O professor '{nome_prof}' ainda não tem uma pasta configurada no Dicionário.")
+            return
+
+        print("[Drive] 4. Pasta raiz do professor encontrada. Pegando credenciais do Render...")
         client_id = os.getenv("GDRIVE_CLIENT_ID")
         client_secret = os.getenv("GDRIVE_CLIENT_SECRET")
         refresh_token = os.getenv("GDRIVE_REFRESH_TOKEN")
@@ -1491,7 +1505,7 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
             print("[Drive] ❌ ERRO: As variáveis de ambiente do GDrive não estão configuradas no Render!")
             return
 
-        print("[Drive] 8. Gerando Token de Acesso do Google...")
+        print("[Drive] 5. Gerando Token de Acesso do Google...")
         token_res = requests.post(
             "https://oauth2.googleapis.com/token",
             data={
@@ -1507,7 +1521,7 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
             print(f"[Drive] ❌ Falha ao gerar Access Token: {token_res}")
             return
             
-        print("[Drive] 9. Token gerado com sucesso. Navegando nas pastas...")
+        print("[Drive] 6. Token gerado com sucesso. Navegando nas pastas...")
         headers = {"Authorization": f"Bearer {access_token}"}
 
         # Funções Auxiliares para o Drive
@@ -1536,7 +1550,7 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
         mes_id = buscar_pasta(mes_nome, ano_id) or criar_pasta(mes_nome, ano_id)
         turma_id = buscar_pasta(nome_pasta_turma, mes_id) or criar_pasta(nome_pasta_turma, mes_id)
 
-        print(f"[Drive] 10. Pastas prontas (Turma ID: {turma_id}). Iniciando envio da foto...")
+        print(f"[Drive] 7. Pastas prontas (Turma ID: {turma_id}). Iniciando envio da foto...")
 
         nome_arquivo = f"{dt_aula.strftime('%d-%m-%Y')} TURMA - {codigo_turma}.{file_ext}"
         metadata = {"name": nome_arquivo, "parents": [turma_id]}
@@ -1553,13 +1567,12 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
         )
         
         if res_upload.status_code == 200:
-            print(f"[Drive] 11. ✅ SUCESSO ABSOLUTO! Arquivo salvo na turma {codigo_turma}.")
+            print(f"[Drive] 8. ✅ SUCESSO ABSOLUTO! Arquivo salvo na turma {codigo_turma}.")
         else:
             print(f"[Drive] ❌ Erro no upload final: {res_upload.text}")
 
     except Exception as e:
         print(f"[Drive] ❌ ERRO FATAL no background task: {str(e)}")
-
 @router.post("/chamada/salvar-v3")
 async def salvar_chamada_foto(
     background_tasks: BackgroundTasks, # <-- 1. Adicionamos a tarefa em segundo plano aqui
