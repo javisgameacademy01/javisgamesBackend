@@ -1594,7 +1594,7 @@ async def salvar_chamada_foto(
         # 3. Insere todos os alunos no banco de uma vez (Super rápido)
         # IMPORTANTE: Você precisará ir no Supabase e DESATIVAR a Trigger 'fn_enviar_foto_drive_javis' 
         # para ela parar de causar o erro 500.
-        supabase.table("tb_chamadas").upsert(dados_insercao).execute()
+        supabase.table("tb_chamadas").upsert(dados_insercao, on_conflict="id_aluno,codigo_turma,data_aula").execute()
 
         # 4. O PULO DO GATO: Manda o arquivo para o Google Drive em segundo plano!
         background_tasks.add_task(enviar_para_google_drive, codigo_turma, data_aula, file_content, file_ext, id_prof)
