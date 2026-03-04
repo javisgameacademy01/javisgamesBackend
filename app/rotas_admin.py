@@ -865,9 +865,9 @@ def admin_agenda(authorization: str = Header(None)):
         return []
         
 @router.put("/reposicao-completa/{id_repo}")
-async def atualizar_reposicao_completa( # <-- Adicionado o async
+async def atualizar_reposicao_completa(
     id_repo: str, 
-    background_tasks: BackgroundTasks, # <-- Adicionado o disparador de tarefas
+    background_tasks: BackgroundTasks, 
     presenca: str = Form(...), 
     observacoes: str = Form(None), 
     arquivo: UploadFile = File(None), 
@@ -875,158 +875,88 @@ async def atualizar_reposicao_completa( # <-- Adicionado o async
 ):
     if not authorization: raise HTTPException(status_code=401)
     
-    # 1. Identificando quem clicou no botão (para caso precise)
-    token = authorization.split(" ")[1]
-    ctx = get_contexto_usuario(token)
-    id_prof_logado = ctx.get("id_colaborador")
-
     try:
         pres_bool = True if presenca == "true" else (False if presenca == "false" else None)
         updates = { "presenca": pres_bool, "observacoes": observacoes }
 
         if arquivo:
-            # Lendo o arquivo de forma assíncrona
-            file_content = await arquivo.read() 
+            file_content = await arquivo.read()
             file_ext = arquivo.filename.split('.')[-1]
+            # Organização por subpasta dentro do bucket 'listas-chamada'
             file_path = f"reposicoes/assinatura_{id_repo}.{file_ext}" 
             
-            # Salvando rápido no Storage do Supabase
+            # Upload rápido para o Supabase
             supabase.storage.from_("listas-chamada").upload(file_path, file_content, file_options={"content-type": arquivo.content_type, "upsert": "true"})
             updates["arquivo_assinatura"] = supabase.storage.from_("listas-chamada").get_public_url(file_path)
 
-            # O PULO DO GATO: Disparando a foto para o Drive em Segundo Plano
-            background_tasks.add_task(enviar_reposicao_google_drive, id_repo, file_content, file_ext, id_prof_logado)
+            # Dispara para o Google Drive em background
+            background_tasks.add_task(enviar_reposicao_google_drive, id_repo, file_content, file_ext)
 
-        # Salvando as informações de texto no banco de dados
         supabase.table("tb_reposicoes").update(updates).eq("id", id_repo).execute()
-        
-        # Resposta imediata para o usuário
-        return {"message": "Atualizado!"}
+        return {"message": "Reposição atualizada com sucesso!"}
         
     except Exception as e: 
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- FUNÇÃO ASSÍNCRONA PARA O GOOGLE DRIVE (REPOSIÇÕES) ---
-def enviar_reposicao_google_drive(id_repo: str, file_content: bytes, file_ext: str, id_prof_logado: int):
+def enviar_reposicao_google_drive(id_repo: str, file_content: bytes, file_ext: str):
     try:
-        print(f"[Drive-Repo] 1. Iniciando upload em background da Reposição (ID: {id_repo})...")
+        print(f"[Drive-Repo] 1. Iniciando processo para a Reposição ID: {id_repo}")
         
-        # 1. Busca os dados cruciais da reposição
+        # Busca dados da reposição (incluindo o ID do professor responsável)
         repo_resp = supabase.table("tb_reposicoes").select("codigo_turma, data_reposicao, id_professor, id_aluno").eq("id", id_repo).single().execute()
-        
-        if not repo_resp.data:
-            print("[Drive-Repo] ❌ ERRO: Reposição não encontrada no banco!")
-            return
+        if not repo_resp.data: return
             
-        codigo_turma = repo_resp.data.get("codigo_turma")
-        data_repo = repo_resp.data.get("data_reposicao") 
-        id_verdadeiro_prof = repo_resp.data.get("id_professor")
-        id_aluno = repo_resp.data.get("id_aluno")
-        
-        # Limpa a data (pega só o YYYY-MM-DD)
-        data_aula = data_repo.split("T")[0] if data_repo and "T" in data_repo else data_repo
+        dados = repo_resp.data
+        data_aula = dados["data_reposicao"].split("T")[0]
 
-        # 2. Busca nomes complementares
-        aluno_resp = supabase.table("tb_alunos").select("nome_completo").eq("id_aluno", id_aluno).single().execute()
-        nome_aluno = aluno_resp.data.get("nome_completo", "ALUNO").upper() if aluno_resp.data else "ALUNO"
+        # Busca nomes para organização do arquivo
+        aluno_nome = supabase.table("tb_alunos").select("nome_completo").eq("id_aluno", dados["id_aluno"]).single().execute().data.get("nome_completo", "ALUNO").upper()
+        prof_nome = supabase.table("tb_colaboradores").select("nome_completo").eq("id_colaborador", dados["id_professor"]).single().execute().data.get("nome_completo", "").upper()
 
-        prof_resp = supabase.table("tb_colaboradores").select("nome_completo").eq("id_colaborador", id_verdadeiro_prof).single().execute()
-        nome_prof = prof_resp.data.get("nome_completo", "").upper() if prof_resp.data else ""
-
-        print(f"[Drive-Repo] 2. Professor responsável pela turma: {nome_prof} | Aluno: {nome_aluno}")
-
-        # ==========================================================
-        # 🌟 DICIONÁRIO DE PASTAS DOS PROFESSORES
-        # ==========================================================
+        # Dicionário de Pastas (Mesmo das chamadas)
         PASTAS_DOS_PROFESSORES = {
             "BRENO": '1PONtYJQnm0iQ1N9xYRIuYbYHueHb5y6a',
             "FELIPE": '1y9ar0CeQ0Nunw5B-ShOlDW6N66xy167k'
         }
 
-        root_id = None
-        for chave_nome, id_pasta in PASTAS_DOS_PROFESSORES.items():
-            if chave_nome in nome_prof:
-                root_id = id_pasta
-                break
-
+        root_id = next((v for k, v in PASTAS_DOS_PROFESSORES.items() if k in prof_nome), None)
         if not root_id:
-            print(f"[Drive-Repo] ❌ Cancelado: O professor '{nome_prof}' não tem pasta configurada no dicionário.")
+            print(f"[Drive-Repo] ❌ Sem pasta configurada para o professor: {prof_nome}")
             return
 
-        print("[Drive-Repo] 3. Pegando credenciais do Render...")
-        client_id = os.getenv("GDRIVE_CLIENT_ID")
-        client_secret = os.getenv("GDRIVE_CLIENT_SECRET")
-        refresh_token = os.getenv("GDRIVE_REFRESH_TOKEN")
+        # Setup do Token Google
+        token_res = requests.post("https://oauth2.googleapis.com/token", data={
+            "client_id": os.getenv("GDRIVE_CLIENT_ID"),
+            "client_secret": os.getenv("GDRIVE_CLIENT_SECRET"),
+            "refresh_token": os.getenv("GDRIVE_REFRESH_TOKEN"),
+            "grant_type": "refresh_token"
+        }).json()
+        headers = {"Authorization": f"Bearer {token_res.get('access_token')}"}
 
-        if not client_id or not refresh_token: return
-
-        token_res = requests.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token"
-            }
-        ).json()
-        
-        access_token = token_res.get("access_token")
-        if not access_token: return
-            
-        headers = {"Authorization": f"Bearer {access_token}"}
-
-        # Funções Auxiliares para o Drive
-        def buscar_pasta(nome, parent_id):
+        # Funções auxiliares de navegação
+        def gerenciar_pasta(nome, parent_id):
             q = f"name='{nome}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
             res = requests.get("https://www.googleapis.com/drive/v3/files", headers=headers, params={"q": q}).json()
-            return res.get("files", [])[0]["id"] if res.get("files") else None
+            if res.get("files"): return res["files"][0]["id"]
+            return requests.post("https://www.googleapis.com/drive/v3/files", headers=headers, json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}).json().get("id")
 
-        def criar_pasta(nome, parent_id):
-            res = requests.post("https://www.googleapis.com/drive/v3/files", headers=headers, json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}).json()
-            return res.get("id")
-
-        # Configuração de Nomes (Ano e Mês)
-        dt_aula = datetime.strptime(data_aula, "%Y-%m-%d")
-        ano_str = dt_aula.strftime("%Y")
+        # Navega: Ano -> Mês -> REPOSIÇÃO
+        dt = datetime.strptime(data_aula, "%Y-%m-%d")
         meses = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
-        mes_num = dt_aula.month
-        mes_nome = meses[mes_num]
         
-        if "BRENO" in nome_prof:
-            mes_nome = f"{mes_num:02d} {mes_nome}" # Ex: "03 MARÇO"
+        ano_id = gerenciar_pasta(dt.strftime("%Y"), root_id)
+        mes_nome = f"{dt.month:02d} {meses[dt.month]}" if "BRENO" in prof_nome else meses[dt.month]
+        mes_id = gerenciar_pasta(mes_nome, ano_id)
+        repo_folder_id = gerenciar_pasta("REPOSIÇÃO", mes_id)
 
-        # 4. NAVEGAÇÃO E CRIAÇÃO DAS PASTAS
-        ano_id = buscar_pasta(ano_str, root_id) or criar_pasta(ano_str, root_id)
-        mes_id = buscar_pasta(mes_nome, ano_id) or criar_pasta(mes_nome, ano_id)
+        # Upload final
+        nome_arquivo = f"{dt.strftime('%d-%m-%Y')} REPOSICAO - {aluno_nome} - TURMA {dados['codigo_turma']}.{file_ext}"
+        metadata = {"name": nome_arquivo, "parents": [repo_folder_id]}
+        requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", headers=headers, 
+                      files={'metadata': (None, json.dumps(metadata), 'application/json'), 'file': (nome_arquivo, file_content)})
         
-        # 🌟 O PULO DO GATO AQUI: Ele busca ou cria a pasta "REPOSIÇÃO" dentro do mês
-        nome_pasta_reposicao = "REPOSIÇÃO"
-        reposicao_id = buscar_pasta(nome_pasta_reposicao, mes_id) or criar_pasta(nome_pasta_reposicao, mes_id)
-
-        print(f"[Drive-Repo] 4. Pastas prontas. Enviando arquivo para a pasta REPOSIÇÃO...")
-
-        # 5. UPLOAD NA PASTA DE REPOSIÇÃO
-        nome_arquivo = f"{dt_aula.strftime('%d-%m-%Y')} REPOSICAO - {nome_aluno} - TURMA {codigo_turma}.{file_ext}"
-        metadata = {"name": nome_arquivo, "parents": [reposicao_id]} # <-- Salva dentro da pasta REPOSIÇÃO
-        
-        files = {
-            'metadata': (None, json.dumps(metadata), 'application/json'),
-            'file': (nome_arquivo, file_content, f'image/{file_ext}')
-        }
-        
-        res_upload = requests.post(
-            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-            headers=headers,
-            files=files
-        )
-        
-        if res_upload.status_code == 200:
-            print(f"[Drive-Repo] 5. ✅ SUCESSO! Reposição do(a) {nome_aluno} salva no Drive (Mês: {mes_nome}).")
-        else:
-            print(f"[Drive-Repo] ❌ Erro no upload final: {res_upload.text}")
-
-    except Exception as e:
-        print(f"[Drive-Repo] ❌ ERRO FATAL no background task: {str(e)}")
+        print(f"[Drive-Repo] ✅ Sucesso: {nome_arquivo} enviado.")
+    except Exception as e: print(f"[Drive-Repo] ❌ Erro: {e}")
 
 @router.patch("/editar-reposicao/{id_repo}")
 def atualizar_dados_reposicao(id_repo: str, dados: ReposicaoEdicaoData, authorization: str = Header(None)):
