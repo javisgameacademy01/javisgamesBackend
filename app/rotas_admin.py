@@ -959,29 +959,44 @@ def enviar_reposicao_google_drive(id_repo: str, file_content: bytes, file_ext: s
     except Exception as e: print(f"[Drive-Repo] ❌ Erro: {e}")
 
 @router.patch("/editar-reposicao/{id_repo}")
-def atualizar_dados_reposicao(id_repo: str, dados: ReposicaoEdicaoData, authorization: str = Header(None)):
+def atualizar_dados_reposicao(
+    id_repo: str, 
+    dados: dict, # Recebe um dicionário para ser flexível
+    authorization: str = Header(None)
+):
     if not authorization: raise HTTPException(status_code=401)
+    
+    # 1. Validação de quem está editando
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
-    if not verificar_permissao_repo(id_repo, ctx): raise HTTPException(status_code=403)
-    try:
-        updates = {}
-        if dados.data_hora: updates["data_reposicao"] = dados.data_hora
-        if dados.conteudo_aula: updates["conteudo_aula"] = dados.conteudo_aula
-        if updates: supabase.table("tb_reposicoes").update(updates).eq("id", id_repo).execute()
-        return {"message": "Atualizado!"}
-    except Exception as e: raise HTTPException(status_code=400, detail=str(e))
+    
+    # Apenas Coordenação (4), Gerente/Diretor (8) ou TI (8) podem editar
+    if ctx['nivel'] < 4:
+        raise HTTPException(status_code=403, detail="Sem permissão para editar reposições.")
 
-@router.patch("/reposicao/{id_repo}")
-def atualizar_reposicao_status(id_repo: str, dados: ReposicaoUpdate, authorization: str = Header(None)):
-    if not authorization: raise HTTPException(status_code=401)
-    token = authorization.split(" ")[1]
-    ctx = get_contexto_usuario(token)
-    if not verificar_permissao_repo(id_repo, ctx): raise HTTPException(status_code=403)
     try:
-        supabase.table("tb_reposicoes").update({"presenca": dados.presenca, "observacoes": dados.observacoes}).eq("id", id_repo).execute()
-        return {"message": "OK"}
-    except: raise HTTPException(status_code=400)
+        # 2. Filtramos apenas os campos que podem ser editados
+        campos_permitidos = [
+            "id_aluno", "id_professor", "codigo_turma", 
+            "data_reposicao", "conteudo_aula", "motivo", "observacoes"
+        ]
+        
+        updates = {k: v for k, v in dados.items() if k in campos_permitidos}
+
+        if not updates:
+            return {"message": "Nenhum campo válido para atualização enviado."}
+
+        # 3. Executa o update no Supabase
+        res = supabase.table("tb_reposicoes").update(updates).eq("id", id_repo).execute()
+        
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Reposição não encontrada.")
+
+        return {"message": "Reposição editada com sucesso!", "dados": res.data[0]}
+
+    except Exception as e:
+        logger.error(f"Erro ao editar reposição: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/reposicao/finalizar")
 async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(None)):
