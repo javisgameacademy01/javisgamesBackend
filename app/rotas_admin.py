@@ -868,7 +868,10 @@ def admin_agenda(authorization: str = Header(None)):
 async def atualizar_reposicao_completa(
     id_repo: str, 
     background_tasks: BackgroundTasks, 
-    presenca: str = Form(...), 
+    data_hora: str = Form(None), # Novo: permite editar data
+    id_professor: int = Form(None), # Novo: permite trocar professor
+    conteudo_aula: str = Form(None), # Novo: permite editar conteúdo
+    presenca: str = Form(None), 
     observacoes: str = Form(None), 
     arquivo: UploadFile = File(None), 
     authorization: str = Header(None)
