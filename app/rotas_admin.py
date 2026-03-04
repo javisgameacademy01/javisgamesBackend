@@ -888,7 +888,7 @@ async def atualizar_reposicao_completa( # <-- Adicionado o async
             # Lendo o arquivo de forma assíncrona
             file_content = await arquivo.read() 
             file_ext = arquivo.filename.split('.')[-1]
-            file_path = f"assinatura_{id_repo}.{file_ext}" 
+            file_path = f"reposicoes/assinatura_{id_repo}.{file_ext}" 
             
             # Salvando rápido no Storage do Supabase
             supabase.storage.from_("listas-chamada").upload(file_path, file_content, file_options={"content-type": arquivo.content_type, "upsert": "true"})
