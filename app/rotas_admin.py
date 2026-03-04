@@ -1453,33 +1453,45 @@ def salvar_chamada_estruturada(lista: List[ItemChamada], authorization: str = He
         return {"status": "success", "count": len(dados_chamada)}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# --- FUNÇÃO ASSÍNCRONA PARA O GOOGLE DRIVE ---
+# --- FUNÇÃO ASSÍNCRONA PARA O GOOGLE DRIVE COM RASTREADORES ---
 def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: bytes, file_ext: str, id_prof: int):
     try:
-        print(f"[Drive] Iniciando upload em background para a turma {codigo_turma}...")
-        
-        # 1. Busca o nome do professor e o nome do curso
+        print(f"[Drive] 1. Iniciando upload em background para a turma {codigo_turma}...")
+        print(f"[Drive] 2. ID do Professor recebido: {id_prof}")
+
+        if not id_prof:
+            print("[Drive] ❌ ERRO: O ID do professor chegou vazio!")
+            return
+
+        print("[Drive] 3. Buscando nome do professor no Supabase...")
         prof_resp = supabase.table("tb_colaboradores").select("nome_completo").eq("id_colaborador", id_prof).single().execute()
         nome_prof = prof_resp.data.get("nome_completo", "").upper() if prof_resp.data else ""
+        print(f"[Drive] 4. Professor encontrado: {nome_prof}")
 
+        print("[Drive] 5. Buscando nome do curso...")
         turma_resp = supabase.table("tb_turmas").select("nome_curso").eq("codigo_turma", codigo_turma).single().execute()
         nome_curso = turma_resp.data.get("nome_curso", "") if turma_resp.data else ""
+        print(f"[Drive] 6. Curso encontrado: {nome_curso}")
 
-        # 2. Define a Pasta Raiz
         root_id = None
         if "BRENO" in nome_prof:
             root_id = '1PONtYJQnm0iQ1N9xYRIuYbYHueHb5y6a'
         elif "FELIPE" in nome_prof:
             root_id = '1y9ar0CeQ0Nunw5B-ShOlDW6N66xy167k'
         else:
-            print("[Drive] Professor não é Breno nem Felipe. Cancelando upload.")
+            print(f"[Drive] ❌ Cancelado: O professor '{nome_prof}' não é Breno nem Felipe.")
             return
 
-        # 3. Gera o Token do Google usando as Variáveis de Ambiente do Render
+        print("[Drive] 7. Pegando credenciais do Render...")
         client_id = os.getenv("GDRIVE_CLIENT_ID")
         client_secret = os.getenv("GDRIVE_CLIENT_SECRET")
         refresh_token = os.getenv("GDRIVE_REFRESH_TOKEN")
 
+        if not client_id or not refresh_token:
+            print("[Drive] ❌ ERRO: As variáveis de ambiente do GDrive não estão configuradas no Render!")
+            return
+
+        print("[Drive] 8. Gerando Token de Acesso do Google...")
         token_res = requests.post(
             "https://oauth2.googleapis.com/token",
             data={
@@ -1492,9 +1504,10 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
         
         access_token = token_res.get("access_token")
         if not access_token:
-            print("[Drive] Falha ao gerar Access Token!")
+            print(f"[Drive] ❌ Falha ao gerar Access Token: {token_res}")
             return
             
+        print("[Drive] 9. Token gerado com sucesso. Navegando nas pastas...")
         headers = {"Authorization": f"Bearer {access_token}"}
 
         # Funções Auxiliares para o Drive
@@ -1507,7 +1520,6 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
             res = requests.post("https://www.googleapis.com/drive/v3/files", headers=headers, json={"name": nome, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}).json()
             return res.get("id")
 
-        # 4. Formata as Datas e Nomes (Padrão Breno vs Felipe)
         dt_aula = datetime.strptime(data_aula, "%Y-%m-%d")
         ano_str = dt_aula.strftime("%Y")
         meses = {1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"}
@@ -1517,15 +1529,15 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
         nome_pasta_turma = codigo_turma
 
         if "BRENO" in nome_prof:
-            mes_nome = f"{mes_num:02d} {mes_nome}" # Ex: 03 MARÇO
-            nome_pasta_turma = f"{codigo_turma} {nome_curso}".strip() # Ex: 7002 GAME PRO
+            mes_nome = f"{mes_num:02d} {mes_nome}"
+            nome_pasta_turma = f"{codigo_turma} {nome_curso}".strip()
 
-        # 5. Navegação e Criação das Pastas (Rápido e seguro)
         ano_id = buscar_pasta(ano_str, root_id) or criar_pasta(ano_str, root_id)
         mes_id = buscar_pasta(mes_nome, ano_id) or criar_pasta(mes_nome, ano_id)
         turma_id = buscar_pasta(nome_pasta_turma, mes_id) or criar_pasta(nome_pasta_turma, mes_id)
 
-        # 6. Upload do Arquivo
+        print(f"[Drive] 10. Pastas prontas (Turma ID: {turma_id}). Iniciando envio da foto...")
+
         nome_arquivo = f"{dt_aula.strftime('%d-%m-%Y')} TURMA - {codigo_turma}.{file_ext}"
         metadata = {"name": nome_arquivo, "parents": [turma_id]}
         
@@ -1541,12 +1553,12 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
         )
         
         if res_upload.status_code == 200:
-            print(f"[Drive] Sucesso! Arquivo salvo na turma {codigo_turma}.")
+            print(f"[Drive] 11. ✅ SUCESSO ABSOLUTO! Arquivo salvo na turma {codigo_turma}.")
         else:
-            print(f"[Drive] Erro no upload: {res_upload.text}")
+            print(f"[Drive] ❌ Erro no upload final: {res_upload.text}")
 
     except Exception as e:
-        print(f"[Drive] Erro fatal no background task: {e}")
+        print(f"[Drive] ❌ ERRO FATAL no background task: {str(e)}")
 
 @router.post("/chamada/salvar-v3")
 async def salvar_chamada_foto(
