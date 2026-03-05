@@ -162,18 +162,24 @@ def _get_aluno_context(token: str) -> Dict[str, Any]:
 
 def _fetch_cursos_didaticos() -> List[Dict[str, Any]]:
     """
-    Busca cursos com módulos e aulas aninhados, e normaliza a ordenação pelo ID.
+    Busca cursos com módulos e aulas aninhados, ordenando pelo ID.
     """
-    # Removemos o .order("ordem") daqui para evitar o Erro 500
+    # Note que removemos o .order("ordem") da query principal
     resp = supabase.table("cursos").select("*, modulos(*, aulas(*))").execute()
 
     cursos = resp.data or []
     for c in cursos:
+        # Geramos o slug para garantir que 'GAME DEV' vire 'game-dev'
         c["slug"] = _slugify(c.get("slug") or c.get("titulo") or "")
-        # Ordenamos pelo ID do módulo e ID da aula diretamente no Python
-        for m in c.get("modulos", []) or []:
-            m["aulas"] = sorted(m.get("aulas", []) or [], key=lambda x: x.get("id", 0))
-        c["modulos"] = sorted(c.get("modulos", []) or [], key=lambda x: x.get("id", 0))
+        
+        # Ordenamos os módulos pelo ID (quem foi criado primeiro aparece primeiro)
+        if "modulos" in c and c["modulos"]:
+            c["modulos"] = sorted(c["modulos"], key=lambda x: x.get("id", 0))
+            
+            # Ordenamos as aulas dentro de cada módulo pelo ID
+            for m in c["modulos"]:
+                if "aulas" in m and m["aulas"]:
+                    m["aulas"] = sorted(m["aulas"], key=lambda x: x.get("id", 0))
     
     return sorted(cursos, key=lambda x: x.get("id", 0))
 
