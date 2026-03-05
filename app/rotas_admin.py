@@ -1049,16 +1049,31 @@ async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(Non
 async def concluir_reposicao(id_repo: str, authorization: str = Header(None)):
     ctx = obter_dados_token(authorization)
     try:
+        # 1. Busca a reposição para validar se existe
         resp = supabase.table("tb_reposicoes").select("*").eq("id", id_repo).execute()
+        
         if not resp.data:
+            # CORREÇÃO: Usar HTTPException corretamente para evitar o Erro 500
             raise HTTPException(status_code=404, detail="Reposição não encontrada")
+            
         repo = resp.data[0]
-        dados_rep = rep.data
+        
+        # 2. Atualiza o status para Concluída
         supabase.table("tb_reposicoes").update({"status": "Concluída"}).eq("id", id_repo).execute()
-        if dados_rep.get('data_falta_original'):
-            supabase.table("tb_chamadas").update({"status_presenca": "R"}).eq("id_aluno", dados_rep['id_aluno']).eq("data_aula", dados_rep['data_falta_original']).execute()
-        return {"status": "success", "message": "Sucesso"}
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+        
+        # 3. Converte a falta original em 'R' (Reposição) se houver data vinculada
+        if repo.get('data_falta_original'):
+            supabase.table("tb_chamadas").update({"status_presenca": "R"})\
+                .eq("id_aluno", repo['id_aluno'])\
+                .eq("data_aula", repo['data_falta_original']).execute()
+                
+        return {"status": "success", "message": "Reposição concluída com sucesso"}
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Erro ao converter reposição: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 # =========================================
