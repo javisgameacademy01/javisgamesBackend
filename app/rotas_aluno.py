@@ -162,17 +162,41 @@ def _get_aluno_context(token: str) -> Dict[str, Any]:
 
 def _fetch_cursos_didaticos() -> List[Dict[str, Any]]:
     """
-    Busca cursos com módulos e aulas aninhados, e normaliza a ordenação.
+    Busca cursos com módulos e aulas aninhados, e normaliza a ordenação pelo ID.
     """
-    resp = supabase.table("cursos")        .select("*, modulos(*, aulas(*))")        .order("ordem")        .execute()
+    # Removemos o .order("ordem") daqui para evitar o Erro 500
+    resp = supabase.table("cursos").select("*, modulos(*, aulas(*))").execute()
 
     cursos = resp.data or []
     for c in cursos:
         c["slug"] = _slugify(c.get("slug") or c.get("titulo") or "")
+        # Ordenamos pelo ID do módulo e ID da aula diretamente no Python
         for m in c.get("modulos", []) or []:
-            m["aulas"] = sorted(m.get("aulas", []) or [], key=lambda x: x.get("ordem", 0))
-        c["modulos"] = sorted(c.get("modulos", []) or [], key=lambda x: x.get("ordem", 0))
-    return cursos
+            m["aulas"] = sorted(m.get("aulas", []) or [], key=lambda x: x.get("id", 0))
+        c["modulos"] = sorted(c.get("modulos", []) or [], key=lambda x: x.get("id", 0))
+    
+    return sorted(cursos, key=lambda x: x.get("id", 0))
+
+
+def _flatten_aulas(curso: Dict[str, Any]) -> List[Dict[str, Any]]:
+    aulas = []
+    for m in curso.get("modulos", []) or []:
+        for a in m.get("aulas", []) or []:
+            aulas.append({
+                "id": a.get("id"),
+                "titulo": a.get("titulo"),
+                "modulo_id": m.get("id"),
+                "modulo_titulo": m.get("titulo"),
+                "ordem_modulo": m.get("id", 0), # Mudamos de "ordem" para "id"
+                "ordem_aula": a.get("id", 0),   # Mudamos de "ordem" para "id"
+            })
+    
+    aulas.sort(key=lambda x: (x["ordem_modulo"], x["ordem_aula"]))
+    
+    # Index global para cálculo de liberação automática
+    for idx, a in enumerate(aulas, start=1):
+        a["ordem_global"] = idx
+    return aulas
 
 
 def _flatten_aulas(curso: Dict[str, Any]) -> List[Dict[str, Any]]:
