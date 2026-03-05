@@ -1047,33 +1047,36 @@ async def finalizar_reposicao(id_reposicao: int, authorization: str = Header(Non
 
 @router.post("/reposicao/concluir-e-converter")
 async def concluir_reposicao(id_repo: str, authorization: str = Header(None)):
+    logger.info(f"--- CONVERTENDO REPOSIÇÃO PARA PRESENÇA (R) ---")
+    logger.info(f"ID Reposição: {id_repo}")
+    
     ctx = obter_dados_token(authorization)
     try:
-        # 1. Busca a reposição para validar se existe
         resp = supabase.table("tb_reposicoes").select("*").eq("id", id_repo).execute()
         
         if not resp.data:
-            # CORREÇÃO: Usar HTTPException corretamente para evitar o Erro 500
+            logger.warning(f"⚠️ Reposição {id_repo} não encontrada no banco.")
             raise HTTPException(status_code=404, detail="Reposição não encontrada")
             
         repo = resp.data[0]
+        logger.info(f"Reposição encontrada para Aluno ID: {repo['id_aluno']}")
         
-        # 2. Atualiza o status para Concluída
+        # Atualiza status
         supabase.table("tb_reposicoes").update({"status": "Concluída"}).eq("id", id_repo).execute()
+        logger.info(f"Status da reposição atualizado para 'Concluída'.")
         
-        # 3. Converte a falta original em 'R' (Reposição) se houver data vinculada
         if repo.get('data_falta_original'):
+            logger.info(f"Convertendo falta do dia {repo['data_falta_original']} em 'R'...")
             supabase.table("tb_chamadas").update({"status_presenca": "R"})\
                 .eq("id_aluno", repo['id_aluno'])\
                 .eq("data_aula", repo['data_falta_original']).execute()
+            logger.info(f"✅ Falta convertida com sucesso.")
                 
-        return {"status": "success", "message": "Reposição concluída com sucesso"}
+        return {"status": "success", "message": "Sucesso"}
         
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"Erro ao converter reposição: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+        logger.error(f"❌ ERRO NA CONVERSÃO: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================
@@ -1719,28 +1722,33 @@ def enviar_para_google_drive(codigo_turma: str, data_aula: str, file_content: by
         print(f"[Drive] ❌ ERRO FATAL no background task: {str(e)}")
 @router.post("/chamada/salvar-v3")
 async def salvar_chamada_foto(
-    background_tasks: BackgroundTasks, # <-- 1. Adicionamos a tarefa em segundo plano aqui
+    background_tasks: BackgroundTasks,
     codigo_turma: str = Form(...), 
     data_aula: str = Form(...), 
     lista_alunos: str = Form(...),
     arquivo_foto: UploadFile = File(...), 
     authorization: str = Header(None)
 ):
-    logger.info(f"Iniciando salvamento - Turma: {codigo_turma}, Data: {data_aula}")
+    # LOG DE ENTRADA
+    logger.info(f"--- INICIANDO SALVAMENTO DE CHAMADA V3 ---")
+    logger.info(f"Turma: {codigo_turma} | Data: {data_aula}")
+    
     try:
         ctx = obter_dados_token(authorization)
         id_prof = ctx.get("id_colaborador")
         lista_alunos_obj = json.loads(lista_alunos)
+        
+        logger.info(f"Professor logado ID: {id_prof} | Alunos enviados: {len(lista_alunos_obj)}")
 
         file_content = await arquivo_foto.read()
         file_ext = arquivo_foto.filename.split('.')[-1]
         file_path = f"chamadas/{codigo_turma}_{data_aula}.{file_ext}"
         
-        # 1. Salva a foto no Storage do Supabase (Super rápido)
+        # LOG DE STORAGE
+        logger.info(f"Fazendo upload da foto para: {file_path}")
         supabase.storage.from_("listas-chamada").upload(file_path, file_content, file_options={"content-type": arquivo_foto.content_type, "upsert": "true"})
         foto_url = supabase.storage.from_("listas-chamada").get_public_url(file_path)
 
-        # 2. Prepara a lista de alunos
         dados_insercao = []
         for item in lista_alunos_obj:
             dados_insercao.append({
@@ -1748,20 +1756,20 @@ async def salvar_chamada_foto(
                 "id_professor": id_prof, "status_presenca": item["status_presenca"], "url_assinatura": foto_url 
             })
 
-        # 3. Insere todos os alunos no banco de uma vez (Super rápido)
-        # IMPORTANTE: Você precisará ir no Supabase e DESATIVAR a Trigger 'fn_enviar_foto_drive_javis' 
-        # para ela parar de causar o erro 500.
-        supabase.table("tb_chamadas").upsert(dados_insercao, on_conflict="id_aluno,codigo_turma,data_aula").execute()
+        # LOG DE BANCO
+        logger.info(f"Tentando inserir {len(dados_insercao)} registros na tb_chamadas...")
+        res = supabase.table("tb_chamadas").upsert(dados_insercao, on_conflict="id_aluno,codigo_turma,data_aula").execute()
+        
+        logger.info(f"✅ Chamada salva no banco com sucesso.")
 
-        # 4. O PULO DO GATO: Manda o arquivo para o Google Drive em segundo plano!
         background_tasks.add_task(enviar_para_google_drive, codigo_turma, data_aula, file_content, file_ext, id_prof)
+        logger.info(f"Tarefa de background (Google Drive) agendada.")
 
-        # 5. Responde para o app do professor imediatamente
         return {"status": "success", "url_foto": foto_url}
     
     except Exception as e:
-        logger.error(f"ERRO CRÍTICO ao salvar: {str(e)}", exc_info=True)
-        if "Bucket not found" in str(e): raise HTTPException(status_code=404, detail="Bucket não encontrado.")
+        # LOG DE ERRO CRÍTICO
+        logger.error(f"❌ ERRO CRÍTICO NA CHAMADA: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
