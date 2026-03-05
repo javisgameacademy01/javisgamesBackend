@@ -214,7 +214,7 @@ def criar_aula_experimental(dados: AulaExperimentalCreate, authorization: str = 
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.patch("/aulas-experimentais/{id_aula}")
-def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, authorization: str = Header(None)):
+def editar_aula_experimental(id_aula: str, dados: dict, authorization: str = Header(None)): # Trocamos o modelo por dict para teste
     if not authorization: raise HTTPException(status_code=401)
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
@@ -222,25 +222,23 @@ def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, author
     if not _pode_editar_aula_experimental(ctx):
         raise HTTPException(status_code=403, detail="Acesso restrito.")
         
-    registro = supabase.table("tb_aulas_experimentais").select("id_unidade").eq("id", id_aula).single().execute()
-    if not registro.data: raise HTTPException(status_code=404, detail="Aula não encontrada.")
-    if ctx["nivel"] < 9 and registro.data.get("id_unidade") != ctx["id_unidade"]:
-        raise HTTPException(status_code=403, detail="Sem permissão para outra unidade.")
-
     try:
-        updates = dados.model_dump(exclude_none=True)
+        # Filtramos apenas os campos que realmente existem na tb_aulas_experimentais
+        # Isso evita enviar campos extras que quebram o banco
+        campos_validos = [
+            "responsavel", "contato1", "contato2", "aluno", 
+            "data_aula", "horario", "curso", "origem", 
+            "id_vendedor", "status_atendimento", "observacao"
+        ]
         
-        # Correção preventiva: garante que a data não tenha fuso horário ao salvar
-        if "data_aula" in updates and updates["data_aula"]:
-            # Transforma em string YYYY-MM-DD se for um objeto date
-            if not isinstance(updates["data_aula"], str):
-                updates["data_aula"] = updates["data_aula"].strftime("%Y-%m-%d")
-            else:
-                updates["data_aula"] = updates["data_aula"][:10]
+        updates = {k: v for k, v in dados.items() if k in campos_validos}
 
-        supabase.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
-        return {"message": "Atualizado!"}
+        # Executa o update
+        res = supabase.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
+        
+        return {"message": "Atualizado com sucesso!"}
     except Exception as e:
+        logger.error(f"Erro ao editar aula exp: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/aulas-experimentais/{id_aula}")
