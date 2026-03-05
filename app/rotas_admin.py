@@ -229,6 +229,15 @@ def editar_aula_experimental(id_aula: str, dados: AulaExperimentalUpdate, author
 
     try:
         updates = dados.model_dump(exclude_none=True)
+        
+        # Correção preventiva: garante que a data não tenha fuso horário ao salvar
+        if "data_aula" in updates and updates["data_aula"]:
+            # Transforma em string YYYY-MM-DD se for um objeto date
+            if not isinstance(updates["data_aula"], str):
+                updates["data_aula"] = updates["data_aula"].strftime("%Y-%m-%d")
+            else:
+                updates["data_aula"] = updates["data_aula"][:10]
+
         supabase.table("tb_aulas_experimentais").update(updates).eq("id", id_aula).execute()
         return {"message": "Atualizado!"}
     except Exception as e:
