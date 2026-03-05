@@ -185,42 +185,32 @@ def _fetch_cursos_didaticos() -> List[Dict[str, Any]]:
 
 
 def _flatten_aulas(curso: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Transforma a estrutura de módulos/aulas em uma lista única 
+    para cálculo de progresso, usando ID como critério de ordem.
+    """
     aulas = []
-    for m in curso.get("modulos", []) or []:
-        for a in m.get("aulas", []) or []:
+    # Ordenamos os módulos pelo ID antes de iterar
+    modulos = sorted(curso.get("modulos", []) or [], key=lambda x: x.get("id", 0))
+    
+    for m in modulos:
+        # Ordenamos as aulas de cada módulo pelo ID antes de iterar
+        aulas_do_modulo = sorted(m.get("aulas", []) or [], key=lambda x: x.get("id", 0))
+        
+        for a in aulas_do_modulo:
             aulas.append({
                 "id": a.get("id"),
                 "titulo": a.get("titulo"),
                 "modulo_id": m.get("id"),
                 "modulo_titulo": m.get("titulo"),
-                "ordem_modulo": m.get("id", 0), # Mudamos de "ordem" para "id"
-                "ordem_aula": a.get("id", 0),   # Mudamos de "ordem" para "id"
+                "ordem_modulo": m.get("id", 0), # Usamos ID no lugar de ordem
+                "ordem_aula": a.get("id", 0),   # Usamos ID no lugar de ordem
             })
-    
-    aulas.sort(key=lambda x: (x["ordem_modulo"], x["ordem_aula"]))
-    
-    # Index global para cálculo de liberação automática
+            
+    # Criamos o índice global (1, 2, 3...) para o cadeado abrir por data
     for idx, a in enumerate(aulas, start=1):
         a["ordem_global"] = idx
-    return aulas
-
-
-def _flatten_aulas(curso: Dict[str, Any]) -> List[Dict[str, Any]]:
-    aulas = []
-    for m in curso.get("modulos", []) or []:
-        for a in m.get("aulas", []) or []:
-            aulas.append({
-                "id": a.get("id"),
-                "titulo": a.get("titulo"),
-                "modulo_id": m.get("id"),
-                "modulo_titulo": m.get("titulo"),
-                "ordem_modulo": m.get("ordem", 0),
-                "ordem_aula": a.get("ordem", 0),
-            })
-    aulas.sort(key=lambda x: (x["ordem_modulo"], x["ordem_aula"]))
-    # Index global para cálculo de liberação
-    for idx, a in enumerate(aulas, start=1):
-        a["ordem_global"] = idx
+        
     return aulas
 
 
@@ -236,9 +226,6 @@ def meus_cursos(authorization: Optional[str] = Header(None)):
     }
 
     
-
-
-
 @router.get("/curso/{curso_slug}/estrutura")
 def curso_estrutura(curso_slug: str, authorization: Optional[str] = Header(None)):
     """
