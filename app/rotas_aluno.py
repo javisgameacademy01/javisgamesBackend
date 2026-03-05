@@ -79,24 +79,22 @@ def _get_aluno_context(token: str) -> Dict[str, Any]:
 
     matriculas = matriculas_resp.data or []
 
-    # Lista de códigos de turma (únicos, preservando ordem)
+    # Lista de códigos de turma (únicos)
     codigos: List[str] = []
     for m in matriculas:
         c = m.get("codigo_turma")
-        if c is None:
-            continue
-        c = str(c).strip()
         if c:
-            codigos.append(c)
+            codigos.append(str(c).strip())
 
     codigos = list(dict.fromkeys(codigos))
 
     turma_by_codigo: Dict[str, Any] = {}
     if codigos:
+        # ATUALIZADO: Agora procuramos também o id_curso na tabela de turmas
         turmas_resp = (
             supabase.table("tb_turmas")
             .select(
-                "codigo_turma, nome_curso, id_professor, data_inicio, "
+                "codigo_turma, nome_curso, id_curso, id_professor, data_inicio, "
                 "qtd_aulas, status, tipo_turma"
             )
             .in_("codigo_turma", codigos)
@@ -106,27 +104,40 @@ def _get_aluno_context(token: str) -> Dict[str, Any]:
         for t in turmas_resp.data or []:
             turma_by_codigo[str(t.get("codigo_turma")).strip()] = t
 
-    # Monta cursos permitidos (um por curso), usando a matrícula mais recente daquele curso
+    # NOVO: Buscamos os cursos oficiais para pegar o slug real e infalível
+    cursos_resp = supabase.table("cursos").select("id, slug, titulo").execute()
+    cursos_db = {c["id"]: c for c in (cursos_resp.data or [])}
+
+    # Monta cursos permitidos usando o id_curso e o slug oficial
     cursos_by_slug: Dict[str, Any] = {}
     for m in matriculas:
         codigo = m.get("codigo_turma")
-        if codigo is None:
+        if not codigo:
             continue
         codigo = str(codigo).strip()
         turma = turma_by_codigo.get(codigo)
         if not turma:
             continue
 
-        curso_nome = (turma.get("nome_curso") or "").strip()
-        slug = _slugify(curso_nome)
+        id_curso = turma.get("id_curso")
+
+        # Se a turma tem um id_curso, pegamos o slug exato direto do banco!
+        if id_curso and id_curso in cursos_db:
+            slug = cursos_db[id_curso]["slug"]
+            curso_nome = cursos_db[id_curso]["titulo"]
+        else:
+            # Fallback caso seja uma turma muito antiga sem id_curso
+            curso_nome = (turma.get("nome_curso") or "").strip()
+            slug = _slugify(curso_nome)
+
         if not slug:
             continue
 
-        # Como matriculas já vem ordenado desc, a primeira ocorrência do slug é a mais recente
+        # Evita duplicados e usa sempre a matrícula mais recente
         if slug not in cursos_by_slug:
             data_inicio = turma.get("data_inicio") or "2024-01-01"
             cursos_by_slug[slug] = {
-                "id": slug,
+                "id": slug, # Este 'id' é o que o Javascript usa para abrir o cadeado!
                 "data_inicio": data_inicio,
                 "codigo_turma": turma.get("codigo_turma"),
                 "curso_nome": curso_nome,
