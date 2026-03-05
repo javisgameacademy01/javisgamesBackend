@@ -606,15 +606,43 @@ def salvar_aula_conteudo(id_aula: int, dados: AulaConteudoData, authorization: s
     ctx = get_contexto_usuario(token)
     
     try:
+        # NÍVEL 8+ (Coordenação, Direção, TI) -> Acesso Total
         if ctx['nivel'] >= 8:
             supabase.table("aulas").update({"conteudo": dados.conteudo}).eq("id", id_aula).execute()
             return {"message": "Conteúdo BASE atualizado (Modo Coordenação)."}
+            
+        # NÍVEL 5 (Professor) -> Salva apenas na sua versão personalizada
         elif ctx['nivel'] == 5:
             payload = {"id_aula": id_aula, "id_professor": ctx['id_colaborador'], "conteudo": dados.conteudo}
             supabase.table("conteudos_personalizados").upsert(payload, on_conflict="id_aula,id_professor").execute()
             return {"message": "Sua versão personalizada foi salva!"}
+            
+        # NÍVEL 3 (Comercial / Vendedor) -> Salva APENAS se for Aula Experimental
+        elif ctx['nivel'] == 3:
+            # 1. Descobre a qual módulo essa aula pertence
+            aula_resp = supabase.table("aulas").select("modulo_id").eq("id", id_aula).single().execute()
+            if not aula_resp.data:
+                raise HTTPException(status_code=404, detail="Aula não encontrada.")
+                
+            # 2. Descobre a qual curso esse módulo pertence
+            mod_resp = supabase.table("modulos").select("curso_id").eq("id", aula_resp.data["modulo_id"]).single().execute()
+            
+            # 3. Pega o nome do curso
+            curso_resp = supabase.table("cursos").select("titulo").eq("id", mod_resp.data["curso_id"]).single().execute()
+            nome_curso = curso_resp.data.get("titulo", "").upper()
+            
+            # 4. Verifica se é um curso experimental
+            if "EXPERIMENTAL" in nome_curso or "TESTE" in nome_curso:
+                supabase.table("aulas").update({"conteudo": dados.conteudo}).eq("id", id_aula).execute()
+                return {"message": "Aula Experimental atualizada com sucesso!"}
+            else:
+                raise HTTPException(status_code=403, detail=f"Vendedores só podem editar Aulas Experimentais. O curso atual é: {nome_curso}")
+
         else:
-            raise HTTPException(status_code=403, detail="Sem permissão para editar.")
+            raise HTTPException(status_code=403, detail="Sem permissão para editar conteúdos.")
+            
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar: {str(e)}")
 
