@@ -840,66 +840,64 @@ def deletar_reposicao(id_repo: str, authorization: str = Header(None)):
 @router.post("/agendar-reposicao")
 def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
     if not authorization: 
-        raise HTTPException(status_code=401, detail="Token ausente ou inválido")
+        raise HTTPException(status_code=401, detail="Token ausente")
     
     try:
-        # 1. Obtém o contexto do colaborador logado (contém id_colaborador numérico)
+        # 1. Obtém o contexto do colaborador logado (ID numérico)
         ctx = obter_dados_token(authorization)
         id_logado = int(ctx['id_colaborador'])
 
-        # 2. Tratamento da Data e Hora para verificação de conflitos
-        # Aceita formatos com ou sem segundos (T14:30 ou T14:30:00)
+        # 2. Tratamento da Data e Hora (Compatível com o input datetime-local do HTML)
         try:
+            # Tenta o formato padrão do input (YYYY-MM-DDTHH:MM)
             dt_repo_inicio = datetime.strptime(dados.data_hora, "%Y-%m-%dT%H:%M")
         except ValueError:
+            # Caso venha com segundos ou fuso horário (ISO Format)
             dt_repo_inicio = datetime.fromisoformat(dados.data_hora.replace('Z', ''))
             
         dt_repo_fim = dt_repo_inicio + timedelta(hours=1) 
 
-        # 3. Verificação de Conflitos de Horário (Lógica Original Mantida)
+        # 3. Verificação de Conflitos (Lógica de segurança para não chocar com aulas regulares)
         resp_turmas = supabase.table("tb_turmas").select("*").eq("id_professor", dados.id_professor).in_("status", ["Em Andamento", "Planejada"]).execute()
         for turma in resp_turmas.data:
-            if not turma['data_inicio'] or not turma['qtd_aulas'] or not turma['horario']: continue
+            if not turma.get('data_inicio') or not turma.get('horario'): continue
             dt_inicio_turma = datetime.strptime(turma['data_inicio'], "%Y-%m-%d")
             dia_alvo = DIAS_MAPA.get(turma['dia_semana'].split("-")[0].strip(), 0)
             dias_diff = (dia_alvo - dt_inicio_turma.weekday() + 7) % 7
             dt_aula_atual = dt_inicio_turma + timedelta(days=dias_diff)
             
-            # Tenta ler o horário de início da turma
             try:
                 hora_h, hora_m = map(int, turma['horario'].split("-")[0].strip().split(":"))
-            except:
-                continue
+            except: continue
 
-            for _ in range(turma['qtd_aulas']):
+            for _ in range(turma.get('qtd_aulas', 1)):
                 inicio_aula = dt_aula_atual.replace(hour=hora_h, minute=hora_m)
                 fim_aula = inicio_aula + timedelta(hours=2, minutes=30)
                 if (dt_repo_inicio < fim_aula) and (dt_repo_fim > inicio_aula):
-                    raise HTTPException(status_code=409, detail=f"Conflito: O professor já tem aula na turma {turma['codigo_turma']} neste horário.")
+                    raise HTTPException(status_code=409, detail=f"O professor já tem aula na turma {turma['codigo_turma']} neste horário.")
                 dt_aula_atual += timedelta(days=7)
 
-        # 4. Inserção no Banco de Dados (Garantindo tipos numéricos)
+        # 4. Inserção no Supabase (Nomes de colunas batendo com o banco)
         payload = {
             "id_aluno": int(dados.id_aluno),
             "data_reposicao": dados.data_hora,
-            "codigo_turma": dados.turma_codigo,
+            "codigo_turma": dados.codigo_turma, # Nome sincronizado
             "id_professor": int(dados.id_professor),
             "conteudo_aula": dados.conteudo_aula or "Reposição",
-            "motivo": dados.motivo or "Não informado",
+            "motivo": dados.motivo or "Agendada via portal",
             "observacoes": dados.observacoes or "",
-            "criado_por": id_logado, # AGORA É NÚMERO (INT)
+            "criado_por": id_logado, # Enviando Inteiro (BigInt)
             "status": "Agendada"
         }
 
         res = supabase.table("tb_reposicoes").insert(payload).execute()
-        
         return {"message": "Agendada com sucesso!", "data": res.data}
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Erro ao agendar reposição: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Erro no banco: {str(e)}")
+        logger.error(f"Erro Crítico: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Erro interno: {str(e)}")
 
 @router.get("/agenda-geral")
 def admin_agenda(authorization: str = Header(None)):
