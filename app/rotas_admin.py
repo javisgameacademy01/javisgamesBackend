@@ -857,11 +857,11 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Token ausente")
     
     try:
-        # 1. Obtém o ID numérico do colaborador logado
+        # 1. Obtém o ID numérico do colaborador
         ctx = obter_dados_token(authorization)
         id_logado = int(ctx['id_colaborador'])
 
-        # 2. Tratamento da Data/Hora para validação de conflitos
+        # 2. Tratamento da Data/Hora para validação de conflitos (Mantém em formato local)
         try:
             dt_repo_inicio = datetime.strptime(dados.data_hora, "%Y-%m-%dT%H:%M")
         except ValueError:
@@ -869,7 +869,7 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
             
         dt_repo_fim = dt_repo_inicio + timedelta(hours=1) 
 
-        # 3. Verificação de Conflitos (Lógica de segurança)
+        # 3. Verificação de Conflitos
         resp_turmas = supabase.table("tb_turmas").select("*").eq("id_professor", dados.id_professor).in_("status", ["Em Andamento", "Planejada"]).execute()
         for turma in resp_turmas.data:
             if not turma.get('data_inicio') or not turma.get('horario'): continue
@@ -889,11 +889,19 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
                     raise HTTPException(status_code=409, detail=f"Conflito: Professor em aula na turma {turma['codigo_turma']}.")
                 dt_aula_atual += timedelta(days=7)
 
-        # 4. Inserção no Banco de Dados (Mapeando os nomes corretamente)
+        # =========================================================
+        # 🌟 CORREÇÃO DO FUSO HORÁRIO (TIMEZONE BRASIL -03:00)
+        # =========================================================
+        data_salvar = dados.data_hora
+        # Se vier no formato "YYYY-MM-DDTHH:MM" (16 caracteres), anexamos os segundos e o fuso
+        if len(data_salvar) == 16: 
+            data_salvar += ":00-03:00"
+            
+        # 4. Inserção no Banco de Dados
         payload = {
             "id_aluno": int(dados.id_aluno),
-            "data_reposicao": dados.data_hora,
-            "codigo_turma": dados.turma_codigo, # O modelo envia turma_codigo, o banco recebe codigo_turma
+            "data_reposicao": data_salvar, # Agora vai com o fuso do Brasil!
+            "codigo_turma": dados.turma_codigo,
             "id_professor": int(dados.id_professor),
             "conteudo_aula": dados.conteudo_aula or "Reposição",
             "motivo": dados.motivo or "Agendada via painel",
@@ -910,7 +918,6 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
     except Exception as e:
         logger.error(f"Erro no agendamento: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Erro interno: {str(e)}")
-
 @router.get("/agenda-geral")
 def admin_agenda(authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
