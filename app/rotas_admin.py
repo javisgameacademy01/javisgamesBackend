@@ -843,21 +843,19 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Token ausente")
     
     try:
-        # 1. Obtém o contexto do colaborador logado (ID numérico)
+        # 1. Obtém o ID numérico do colaborador logado
         ctx = obter_dados_token(authorization)
         id_logado = int(ctx['id_colaborador'])
 
-        # 2. Tratamento da Data e Hora (Compatível com o input datetime-local do HTML)
+        # 2. Tratamento da Data/Hora para validação de conflitos
         try:
-            # Tenta o formato padrão do input (YYYY-MM-DDTHH:MM)
             dt_repo_inicio = datetime.strptime(dados.data_hora, "%Y-%m-%dT%H:%M")
         except ValueError:
-            # Caso venha com segundos ou fuso horário (ISO Format)
             dt_repo_inicio = datetime.fromisoformat(dados.data_hora.replace('Z', ''))
             
         dt_repo_fim = dt_repo_inicio + timedelta(hours=1) 
 
-        # 3. Verificação de Conflitos (Lógica de segurança para não chocar com aulas regulares)
+        # 3. Verificação de Conflitos (Lógica de segurança)
         resp_turmas = supabase.table("tb_turmas").select("*").eq("id_professor", dados.id_professor).in_("status", ["Em Andamento", "Planejada"]).execute()
         for turma in resp_turmas.data:
             if not turma.get('data_inicio') or not turma.get('horario'): continue
@@ -874,29 +872,29 @@ def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
                 inicio_aula = dt_aula_atual.replace(hour=hora_h, minute=hora_m)
                 fim_aula = inicio_aula + timedelta(hours=2, minutes=30)
                 if (dt_repo_inicio < fim_aula) and (dt_repo_fim > inicio_aula):
-                    raise HTTPException(status_code=409, detail=f"O professor já tem aula na turma {turma['codigo_turma']} neste horário.")
+                    raise HTTPException(status_code=409, detail=f"Conflito: Professor em aula na turma {turma['codigo_turma']}.")
                 dt_aula_atual += timedelta(days=7)
 
-        # 4. Inserção no Supabase (Nomes de colunas batendo com o banco)
+        # 4. Inserção no Banco de Dados (Mapeando os nomes corretamente)
         payload = {
             "id_aluno": int(dados.id_aluno),
             "data_reposicao": dados.data_hora,
-            "codigo_turma": dados.codigo_turma, # Nome sincronizado
+            "codigo_turma": dados.turma_codigo, # O modelo envia turma_codigo, o banco recebe codigo_turma
             "id_professor": int(dados.id_professor),
             "conteudo_aula": dados.conteudo_aula or "Reposição",
-            "motivo": dados.motivo or "Agendada via portal",
+            "motivo": dados.motivo or "Agendada via painel",
             "observacoes": dados.observacoes or "",
-            "criado_por": id_logado, # Enviando Inteiro (BigInt)
+            "criado_por": id_logado,
             "status": "Agendada"
         }
 
         res = supabase.table("tb_reposicoes").insert(payload).execute()
-        return {"message": "Agendada com sucesso!", "data": res.data}
+        return {"message": "Agendada!", "data": res.data}
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Erro Crítico: {str(e)}")
+        logger.error(f"Erro no agendamento: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Erro interno: {str(e)}")
 
 @router.get("/agenda-geral")
