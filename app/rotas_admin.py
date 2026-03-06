@@ -1480,42 +1480,46 @@ def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header
     ctx = get_contexto_usuario(token)
     
     try:
-        # Busca na VIEW que consolida P, F e R
-        query = supabase.table("vw_frequencia_dashboard").select("id_aluno, nome_aluno, codigo_turma, data_aula, status, quantidade_aulas")
+        # Lemos DIRETO da tabela de chamadas, fazendo JOIN com tb_alunos para pegar o nome
+        query = supabase.table("tb_chamadas").select("id_aluno, codigo_turma, data_aula, status_presenca, tb_alunos(nome_completo)")
         
-        # Filtra pelo código da turma (que vem do JS via 'q')
+        # Filtra pelo código da turma (que o JS envia via parâmetro 'q')
         if q: 
             query = query.eq("codigo_turma", q.strip())
             
-        # Ordena por data_aula para conseguirmos simular o "numero_aula" sequencial no JS
+        # Ordena pela data da aula para garantir a linha do tempo correta (Aula 1, Aula 2...)
         dados = query.order("data_aula", desc=False).execute().data
         
-        # Lógica para adicionar 'numero_aula' dinamicamente se a VIEW não o trouxer nativamente
-        # (Isso garante que o JS coloque o 'P' ou 'F' na coluna certa do módulo)
         eventos_processados = []
         contador_aulas_por_aluno = {}
         
         for item in dados:
             aluno_id = item['id_aluno']
+            
+            # Extrai o nome do aluno de forma segura
+            nome_aluno = "Desconhecido"
+            if item.get('tb_alunos') and isinstance(item['tb_alunos'], dict):
+                nome_aluno = item['tb_alunos'].get('nome_completo', 'Desconhecido')
+            
+            # Inicia o contador de aulas para este aluno, se for a primeira vez
             if aluno_id not in contador_aulas_por_aluno:
                 contador_aulas_por_aluno[aluno_id] = 1
                 
             eventos_processados.append({
                 "id_aluno": aluno_id,
-                "nome": item.get('nome_aluno') or "Desconhecido",
+                "nome": nome_aluno,
                 "turma": item.get('codigo_turma'),
-                "status": item.get('status'),
+                "status": item.get('status_presenca'), # Aqui vem o 'P', 'F' ou 'R'
                 "numero_aula": contador_aulas_por_aluno[aluno_id]
             })
             
-            # Se o evento foi 'R' (Reposição) e tiver peso 3, ele pula 3 colunas de aula
-            peso = item.get('quantidade_aulas') or 1
-            contador_aulas_por_aluno[aluno_id] += peso
+            # Incrementa a aula para a próxima passagem
+            contador_aulas_por_aluno[aluno_id] += 1
             
         return eventos_processados
         
     except Exception as e: 
-        logger.error(f"Erro no relatório de frequência: {str(e)}")
+        logger.error(f"Erro no relatório de frequência direto: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard-frequencia-unificado")
