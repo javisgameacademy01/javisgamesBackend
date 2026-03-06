@@ -520,16 +520,27 @@ def admin_listar_cursos_didaticos(authorization: str = Header(None)):
     """Busca a árvore completa: Cursos -> Módulos -> Aulas"""
     if not authorization: raise HTTPException(status_code=401)
     try:
-        resp = supabase.table("cursos").select("*, modulos(*, aulas(*))").order("ordem").execute()
+        # 1. Removi o .order() temporariamente para garantir que a consulta não trave
+        resp = supabase.table("cursos").select("*, modulos(*, aulas(*))").execute()
         
-        for curso in resp.data:
-            curso['modulos'] = sorted(curso.get('modulos', []), key=lambda x: x.get('ordem', 0))
-            for modulo in curso['modulos']:
-                modulo['aulas'] = sorted(modulo.get('aulas', []), key=lambda x: x.get('ordem', 0))
-                
-        return resp.data
+        if not resp.data:
+            logger.warning("⚠️ Tabela 'cursos' retornou vazia do Supabase.")
+            return []
+            
+        dados = resp.data
+        
+        # 2. Ordenação manual para evitar erros de banco
+        for curso in dados:
+            if 'modulos' in curso and curso['modulos']:
+                curso['modulos'] = sorted(curso['modulos'], key=lambda x: x.get('ordem', 0))
+                for modulo in curso['modulos']:
+                    if 'aulas' in modulo and modulo['aulas']:
+                        modulo['aulas'] = sorted(modulo['aulas'], key=lambda x: x.get('ordem', 0))
+        
+        return dados
     except Exception as e:
-        print(f"Erro ao carregar estrutura: {e}")
+        logger.error(f"❌ Erro ao carregar estrutura didática: {e}")
+        # Retorna o erro real para o console do Render te ajudar
         return []
 
 @router.get("/meus-cursos-permitidos")
