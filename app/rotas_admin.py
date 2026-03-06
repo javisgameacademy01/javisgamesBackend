@@ -924,8 +924,7 @@ def admin_agenda(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
     try:
-        # Buscamos TUDO. Sem filtro de status para garantir a visão geral.
-        # Usamos o fkey explícita para evitar o erro de ambiguidade (Multiple Choices)
+        # Buscamos TUDO. Fazemos o join com alunos e professores
         resp_repo = supabase.table("tb_reposicoes")\
             .select("*, tb_alunos!left(nome_completo), professor:tb_colaboradores!tb_reposicoes_id_professor_fkey!left(nome_completo)")\
             .execute()
@@ -950,6 +949,8 @@ def admin_agenda(authorization: str = Header(None)):
                     "tipo": "reposicao",
                     "nome_aluno": nome_aluno,
                     "nome_prof": nome_prof,
+                    "codigo_turma": rep.get("codigo_turma"),
+                    "conteudo": rep.get("conteudo_aula"), 
                     "status": rep.get("status", "Agendada"),
                     "extendedProps": { "status": rep.get("status", "Agendada") }
                 })
