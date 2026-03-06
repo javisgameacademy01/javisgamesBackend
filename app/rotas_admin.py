@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Qu
 from pydantic import BaseModel
 from supabase import create_client, Client
 from datetime import datetime, timedelta
+import time
 import json
 import requests
 import logging
@@ -109,12 +110,14 @@ def calcular_previsao(data_inicio_str: str, qtd: int):
 import time
 
 def get_contexto_usuario(token: str):
-    # Tentativa de retry simples para o erro "Resource temporarily unavailable"
+    # Tentativa de retry para lidar com o erro "Resource temporarily unavailable" do Render
     for tentativa in range(3):
         try:
+            # 1. Valida o Token no Supabase Auth
             user = supabase.auth.get_user(token)
             user_id = user.user.id
             
+            # 2. Busca os dados do colaborador (ID numérico, Unidade, Nível)
             resp = supabase.table("tb_colaboradores")\
                 .select("id_colaborador, id_unidade, id_cargo, tb_cargos!fk_cargos(nivel_acesso)")\
                 .eq("user_id", user_id)\
@@ -122,6 +125,9 @@ def get_contexto_usuario(token: str):
                 .execute()
                 
             dados = resp.data
+            if not dados:
+                raise HTTPException(status_code=403, detail="Acesso não autorizado para este colaborador.")
+
             return {
                 "user_id": user_id,
                 "id_colaborador": dados['id_colaborador'],
@@ -130,14 +136,13 @@ def get_contexto_usuario(token: str):
                 "nivel": dados['tb_cargos']['nivel_acesso']
             }
         except Exception as e:
-            # Se for o erro de recurso indisponível, espera 100ms e tenta de novo
+            # Se for erro de recurso ocupado, espera 150ms e tenta de novo
             if "Resource temporarily unavailable" in str(e) and tentativa < 2:
-                time.sleep(0.1)
+                time.sleep(0.15)
                 continue
             
-            logger.error(f"Erro contexto usuario (Tentativa {tentativa+1}): {e}")
-            raise HTTPException(status_code=401, detail="Sessão instável. Tente novamente.")
-
+            logger.error(f"Falha crítica no contexto do usuário (Tentativa {tentativa+1}): {str(e)}")
+            raise HTTPException(status_code=401, detail="Sessão instável ou expirada. Por favor, faça login novamente.")
 def obter_dados_token(authorization: str):
     try:
         token = authorization.split(" ")[1]
