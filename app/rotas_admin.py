@@ -841,25 +841,48 @@ def deletar_reposicao(id_repo: str, authorization: str = Header(None)):
 def admin_reposicao(dados: ReposicaoData, authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
     try:
-        # - Obtém o contexto que já contém o id_colaborador (inteiro)
-        ctx = obter_dados_token(authorization) 
+        # 1. Obtemos o contexto que já contém o id_colaborador (número inteiro)
+        ctx = obter_dados_token(authorization)
         
-        # O teu cálculo de conflitos de horário aqui...
+        # 2. Convertemos a data para verificar conflitos no calendário
+        dt_repo_inicio = datetime.strptime(dados.data_hora, "%Y-%m-%dT%H:%M")
+        dt_repo_fim = dt_repo_inicio + timedelta(hours=1) 
 
-        # - Inserção corrigida usando ctx['id_colaborador']
+        # --- Verificação de Conflitos (Tua lógica original) ---
+        resp_turmas = supabase.table("tb_turmas").select("*").eq("id_professor", dados.id_professor).in_("status", ["Em Andamento", "Planejada"]).execute()
+        for turma in resp_turmas.data:
+            if not turma['data_inicio'] or not turma['qtd_aulas'] or not turma['horario']: continue
+            dt_inicio_turma = datetime.strptime(turma['data_inicio'], "%Y-%m-%d")
+            dia_alvo = DIAS_MAPA.get(turma['dia_semana'].split("-")[0].strip(), 0)
+            dias_diff = (dia_alvo - dt_inicio_turma.weekday() + 7) % 7
+            dt_aula_atual = dt_inicio_turma + timedelta(days=dias_diff)
+            hora_h, hora_m = map(int, turma['horario'].split("-")[0].strip().split(":"))
+
+            for _ in range(turma['qtd_aulas']):
+                inicio_aula = dt_aula_atual.replace(hour=hora_h, minute=hora_m)
+                fim_aula = inicio_aula + timedelta(hours=2, minutes=30)
+                if (dt_repo_inicio < fim_aula) and (dt_repo_fim > inicio_aula):
+                    raise HTTPException(status_code=409, detail="Conflito com o horário das turmas regulares deste professor.")
+                dt_aula_atual += timedelta(days=7)
+
+        # 3. Inserção corrigida: usamos o id_colaborador (INT) no campo criado_por
         supabase.table("tb_reposicoes").insert({
             "id_aluno": dados.id_aluno, 
             "data_reposicao": dados.data_hora, 
             "codigo_turma": dados.turma_codigo,
             "id_professor": dados.id_professor, 
             "conteudo_aula": dados.conteudo_aula, 
-            "motivo": dados.motivo,
-            "observacoes": dados.observacoes, 
-            "criado_por": ctx['id_colaborador'], # <--- CORREÇÃO AQUI (INT e não UUID)
+            "motivo": getattr(dados, 'motivo', 'Reposição agendada pelo portal'),
+            "observacoes": getattr(dados, 'observacoes', ''), 
+            "criado_por": ctx['id_colaborador'], # CORREÇÃO: Enviando número, não UUID
             "status": "Agendada"
         }).execute()
+
         return {"message": "Agendada!"}
+    except HTTPException as he:
+        raise he
     except Exception as e: 
+        logger.error(f"Erro ao agendar reposição: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/agenda-geral")
