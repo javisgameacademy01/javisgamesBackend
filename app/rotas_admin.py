@@ -106,28 +106,37 @@ def calcular_previsao(data_inicio_str: str, qtd: int):
     except:
         return None
 
+import time
+
 def get_contexto_usuario(token: str):
-    try:
-        user = supabase.auth.get_user(token)
-        user_id = user.user.id
-        
-        resp = supabase.table("tb_colaboradores")\
-            .select("id_colaborador, id_unidade, id_cargo, tb_cargos!fk_cargos(nivel_acesso)")\
-            .eq("user_id", user_id)\
-            .single()\
-            .execute()
+    # Tentativa de retry simples para o erro "Resource temporarily unavailable"
+    for tentativa in range(3):
+        try:
+            user = supabase.auth.get_user(token)
+            user_id = user.user.id
             
-        dados = resp.data
-        return {
-            "user_id": user_id,
-            "id_colaborador": dados['id_colaborador'],
-            "id_unidade": dados['id_unidade'],
-            "id_cargo": dados['id_cargo'],
-            "nivel": dados['tb_cargos']['nivel_acesso']
-        }
-    except Exception as e:
-        print(f"Erro contexto usuario: {e}")
-        raise HTTPException(status_code=401, detail="Usuário não identificado.")
+            resp = supabase.table("tb_colaboradores")\
+                .select("id_colaborador, id_unidade, id_cargo, tb_cargos!fk_cargos(nivel_acesso)")\
+                .eq("user_id", user_id)\
+                .single()\
+                .execute()
+                
+            dados = resp.data
+            return {
+                "user_id": user_id,
+                "id_colaborador": dados['id_colaborador'],
+                "id_unidade": dados['id_unidade'],
+                "id_cargo": dados['id_cargo'],
+                "nivel": dados['tb_cargos']['nivel_acesso']
+            }
+        except Exception as e:
+            # Se for o erro de recurso indisponível, espera 100ms e tenta de novo
+            if "Resource temporarily unavailable" in str(e) and tentativa < 2:
+                time.sleep(0.1)
+                continue
+            
+            logger.error(f"Erro contexto usuario (Tentativa {tentativa+1}): {e}")
+            raise HTTPException(status_code=401, detail="Sessão instável. Tente novamente.")
 
 def obter_dados_token(authorization: str):
     try:
