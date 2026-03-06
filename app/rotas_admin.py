@@ -1473,18 +1473,49 @@ def get_dashboard_stats(authorization: str = Header(None)):
             "reposicoes": 0
         }
 
+@router.get("/relatorio-frequencia-geral")
 def listar_frequencia_geral(q: Optional[str] = None, authorization: str = Header(None)):
     if not authorization: raise HTTPException(status_code=401)
     token = authorization.split(" ")[1]
     ctx = get_contexto_usuario(token)
+    
     try:
-        # CORREÇÃO: Usando a VIEW e o campo 'nome_aluno'
-        query = supabase.table("vw_frequencia_dashboard").select("*")
+        # Busca na VIEW que consolida P, F e R
+        query = supabase.table("vw_frequencia_dashboard").select("id_aluno, nome_aluno, codigo_turma, data_aula, status, quantidade_aulas")
+        
+        # Filtra pelo código da turma (que vem do JS via 'q')
         if q: 
-            query = query.ilike("nome_aluno", f"%{q}%") # Antes estava 'nome', que não existe na VIEW
-        return query.order("data_aula", desc=True).limit(200).execute().data
+            query = query.eq("codigo_turma", q.strip())
+            
+        # Ordena por data_aula para conseguirmos simular o "numero_aula" sequencial no JS
+        dados = query.order("data_aula", desc=False).execute().data
+        
+        # Lógica para adicionar 'numero_aula' dinamicamente se a VIEW não o trouxer nativamente
+        # (Isso garante que o JS coloque o 'P' ou 'F' na coluna certa do módulo)
+        eventos_processados = []
+        contador_aulas_por_aluno = {}
+        
+        for item in dados:
+            aluno_id = item['id_aluno']
+            if aluno_id not in contador_aulas_por_aluno:
+                contador_aulas_por_aluno[aluno_id] = 1
+                
+            eventos_processados.append({
+                "id_aluno": aluno_id,
+                "nome": item.get('nome_aluno') or "Desconhecido",
+                "turma": item.get('codigo_turma'),
+                "status": item.get('status'),
+                "numero_aula": contador_aulas_por_aluno[aluno_id]
+            })
+            
+            # Se o evento foi 'R' (Reposição) e tiver peso 3, ele pula 3 colunas de aula
+            peso = item.get('quantidade_aulas') or 1
+            contador_aulas_por_aluno[aluno_id] += peso
+            
+        return eventos_processados
+        
     except Exception as e: 
-        logger.error(f"Erro no relatório: {str(e)}")
+        logger.error(f"Erro no relatório de frequência: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dashboard-frequencia-unificado")
