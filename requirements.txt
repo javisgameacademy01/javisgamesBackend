@@ -6,6 +6,7 @@ pydantic
 requests
 email-validator
 python-multipart
+pypdf
 
 
 
