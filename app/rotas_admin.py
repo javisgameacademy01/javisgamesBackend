@@ -10,6 +10,10 @@ import time
 import json
 import requests
 import logging
+import time
+import io
+from jinja2 import Template
+from xhtml2pdf import pisa
 from typing import Optional, List
 
 # IMPORTAÇÕES CONSOLIDADAS E LIMPAS (Sem duplicatas)
@@ -36,6 +40,23 @@ from app.modelos import (
     AulaExperimentalCreate,
     AulaExperimentalUpdate
 )
+
+class ContratoData(BaseModel):
+    curso: str
+    aluno_nome: str
+    aluno_cpf: str
+    aluno_nascimento: str
+    whatsapp: str
+    email: str
+    cep: str
+    endereco: str
+    bairro: str
+    escola_nome: str
+    escola_turno: str
+    escola_serie: str
+    responsavel_nome: Optional[str] = None
+    responsavel_cpf: Optional[str] = None
+    responsavel_parentesco: Optional[str] = None
 
 # Logger
 logger = logging.getLogger(__name__)
@@ -1881,3 +1902,170 @@ def admin_listar_professores(authorization: str = Header(None)):
         return query.execute().data
     except: 
         return []
+
+
+# 1. O SEU MODELO HTML DO CONTRATO
+# Você pode estilizar com CSS básico aqui dentro
+TEMPLATE_HTML_CONTRATO = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 2cm; }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; color: #000; line-height: 1.5; }
+        .logo-container { text-align: center; margin-bottom: 20px; }
+        .titulo-principal { text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; }
+        .texto-padrao { text-align: justify; margin-bottom: 15px; }
+        .tabela-dados { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10pt; }
+        .tabela-dados td { border: 1px solid #000; padding: 6px; }
+        .destaque { font-weight: bold; }
+        .clausula-titulo { font-weight: bold; margin-top: 15px; margin-bottom: 5px; }
+        .assinaturas { margin-top: 60px; text-align: center; width: 100%; }
+        .linha-ass { border-top: 1px solid #000; width: 60%; margin: 0 auto; padding-top: 5px; }
+        .caixa-assinatura { width: 100%; margin-top: 40px; }
+    </style>
+</head>
+<body>
+
+    <div class="logo-container">
+        <h2>JAVIS GAME ACADEMY</h2>
+    </div>
+
+    <div class="titulo-principal">
+        Termo de Compromisso do Aluno
+    </div>
+
+    <div class="texto-padrao">
+        Pelo presente instrumento particular, as partes a seguir qualificadas:<br><br>
+        Por meios do <strong>INSTITUTO DO DESENVOLVIMENTO ECONÔMICO, TECNOLÓGICO E CULTURA - IDEC</strong>, sob CNPJ 19.136.591/0001-57, contratando a empresa abaixo para execução do projeto.<br><br>
+        De um lado, pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP: 78050-000 Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
+    </div>
+
+    <table class="tabela-dados">
+        <tr>
+            <td colspan="2"><span class="destaque">Aluno(a):</span> {{ aluno_nome }}</td>
+            <td><span class="destaque">Nasc.:</span> {{ aluno_nascimento }}</td>
+        </tr>
+        <tr>
+            <td colspan="2"><span class="destaque">CPF Aluno:</span> {{ aluno_cpf }}</td>
+            <td><span class="destaque">WhatsApp:</span> {{ whatsapp }}</td>
+        </tr>
+        <tr>
+            <td colspan="3"><span class="destaque">Endereço:</span> {{ endereco }} - <span class="destaque">Bairro:</span> {{ bairro }} - <span class="destaque">CEP:</span> {{ cep }}</td>
+        </tr>
+        <tr>
+            <td><span class="destaque">Escola:</span> {{ escola_nome }}</td>
+            <td><span class="destaque">Turno:</span> {{ escola_turno }}</td>
+            <td><span class="destaque">Série:</span> {{ escola_serie }}</td>
+        </tr>
+        {% if responsavel_nome %}
+        <tr>
+            <td colspan="3" style="background-color: #f9f9f9;"><span class="destaque">Responsável Legal:</span> {{ responsavel_nome }} | <span class="destaque">CPF:</span> {{ responsavel_cpf }} | <span class="destaque">Parentesco:</span> {{ responsavel_parentesco }}</td>
+        </tr>
+        {% endif %}
+    </table>
+
+    <div class="texto-padrao">
+        Resolvem, de comum acordo, celebrar o presente Termo de Compromisso, mediante as cláusulas e condições seguintes:
+    </div>
+
+    <div class="clausula-titulo">Cláusula Primeira - Do Objeto</div>
+    <div class="texto-padrao">
+        O presente Termo tem como objeto a concessão de uma bolsa de estudo integral e gratuita para o(a) ALUNO(A) no curso de <strong>{{ curso }}</strong> 
+        {% if curso == 'GAME DEV' %}
+            com 60h de duração e 6 (seis) meses, 
+        {% else %}
+            com duração de 3 (três) meses, 
+        {% endif %}
+        promovido pelo PROJETO SOCIAL.
+    </div>
+
+    <div class="clausula-titulo">Cláusula Segunda - Das Condições do Curso</div>
+    <div class="texto-padrao">
+        O(A) ALUNO(A) deverá manter uma frequência facial mínima de 75% exigida para a conclusão do curso, bem como obter nota igual ou superior a 7,0 para certificação.
+    </div>
+
+    <div class="clausula-titulo">Cláusula Terceira - Da Rescisão</div>
+    <div class="texto-padrao">
+        O PROJETO SOCIAL poderá rescindir o Termo de imediato, sem prévio aviso, em caso de descumprimento grave de qualquer das obrigações assumidas pelo (a) ALUNO(A), como por exemplo, falta de frequência injustificada e excessiva, conduta inadequada ou danos intencionais ao patrimônio.
+    </div>
+
+    <div class="texto-padrao" style="margin-top: 30px;">
+        E, por estarem assim justos e contratados, assinam o presente Termo de Compromisso.
+    </div>
+
+    <table class="assinaturas">
+        <tr>
+            <td class="caixa-assinatura">
+                <div class="linha-ass"></div>
+                Assinatura do Aluno(a)<br>
+                {% if responsavel_nome %} / Responsável Legal {% endif %}
+            </td>
+            <td class="caixa-assinatura">
+                <div class="linha-ass"></div>
+                JAVIS GAME ACADEMY
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>
+"""
+
+@router.post("/gerar-contrato-html")
+async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Header(None)):
+    try:
+        # 1. PREPARAR O HTML COM OS DADOS (Jinja2)
+        template = Template(TEMPLATE_HTML_CONTRATO)
+        html_renderizado = template.render(
+            curso=dados.curso,
+            aluno_nome=dados.aluno_nome,
+            aluno_cpf=dados.aluno_cpf,
+            aluno_nascimento=dados.aluno_nascimento,
+            whatsapp=dados.whatsapp,
+            endereco=dados.endereco,
+            bairro=dados.bairro,
+            cep=dados.cep,
+            escola_nome=dados.escola_nome,
+            escola_turno=dados.escola_turno,
+            escola_serie=dados.escola_serie,
+            responsavel_nome=dados.responsavel_nome,
+            responsavel_cpf=dados.responsavel_cpf,
+            responsavel_parentesco=dados.responsavel_parentesco
+        )
+
+        # 2. CONVERTER HTML PARA PDF (xhtml2pdf)
+        pdf_file = io.BytesIO()
+        pisa_status = pisa.CreatePDF(
+            io.StringIO(html_renderizado),
+            dest=pdf_file
+        )
+
+        if pisa_status.err:
+            raise Exception("Erro ao converter HTML para PDF")
+
+        pdf_bytes = pdf_file.getvalue()
+
+        # 3. UPLOAD PARA O SUPABASE STORAGE
+        nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
+        
+        supabase.storage.from_("termos").upload(
+            nome_arquivo, 
+            pdf_bytes, 
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+
+        # 4. PEGAR LINK E SALVAR NO BANCO
+        url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
+
+        dados_db = dados.model_dump()
+        dados_db["url_pdf"] = url_pdf
+        
+        res_db = supabase.table("tb_geracao_termos").insert(dados_db).execute()
+
+        return {"status": "success", "url_pdf": url_pdf}
+
+    except Exception as e:
+        logger.error(f"Erro ao gerar contrato PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
