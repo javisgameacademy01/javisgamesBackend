@@ -57,6 +57,10 @@ class ContratoData(BaseModel):
     responsavel_nome: Optional[str] = None
     responsavel_cpf: Optional[str] = None
     responsavel_parentesco: Optional[str] = None
+    responsavel_rg: Optional[str] = None
+    responsavel_rg_orgao: Optional[str] = None
+    responsavel_rg_uf: Optional[str] = None
+    responsavel_rg_data: Optional[str] = None
 
 # Logger
 logger = logging.getLogger(__name__)
