@@ -1912,66 +1912,146 @@ TEMPLATE_HTML_CONTRATO = """
 <head>
     <meta charset="UTF-8">
     <style>
-        @page { size: A4; margin: 2cm; }
-        body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; color: #000; line-height: 1.5; }
-        .logo-container { text-align: center; margin-bottom: 20px; }
-        .titulo-principal { text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; }
-        .texto-padrao { text-align: justify; margin-bottom: 15px; }
-        .tabela-dados { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10pt; }
-        .tabela-dados td { border: 1px solid #000; padding: 6px; }
-        .destaque { font-weight: bold; }
-        .clausula-titulo { font-weight: bold; margin-top: 15px; margin-bottom: 5px; }
-        .assinaturas { margin-top: 60px; text-align: center; width: 100%; }
-        .linha-ass { border-top: 1px solid #000; width: 60%; margin: 0 auto; padding-top: 5px; }
-        .caixa-assinatura { width: 100%; margin-top: 40px; }
+        @page {
+            size: A4;
+            margin: 2cm 2cm 2.5cm 2cm;
+        }
+        body { 
+            font-family: Helvetica, Arial, sans-serif; 
+            font-size: 10pt; 
+            color: #000; 
+            line-height: 1.4; 
+        }
+        .header { 
+            text-align: center; 
+            margin-bottom: 15px; 
+        }
+        .logo-text {
+            font-size: 16pt;
+            font-weight: bold;
+            margin: 0;
+            padding: 0;
+        }
+        .titulo { 
+            text-align: center; 
+            font-size: 12pt; 
+            font-weight: bold; 
+            text-decoration: underline;
+            margin-bottom: 20px; 
+        }
+        .texto-justificado { 
+            text-align: justify; 
+            margin-bottom: 10px; 
+        }
+        /* Tabela de dados do aluno parecida com o original */
+        .tabela-dados { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-bottom: 15px; 
+        }
+        .tabela-dados td { 
+            padding: 3px 0; 
+            vertical-align: bottom;
+        }
+        .linha-dado {
+            border-bottom: 1px solid #000;
+            display: inline-block;
+            width: 100%;
+        }
+        .bold { 
+            font-weight: bold; 
+        }
+        .clausula-titulo { 
+            font-weight: bold; 
+            margin-top: 15px; 
+            margin-bottom: 5px; 
+            text-decoration: underline;
+        }
+        .item-lista {
+            margin-left: 20px;
+            text-align: justify;
+            margin-bottom: 5px;
+        }
+        /* Configuração das assinaturas para não quebrarem de página */
+        .container-assinaturas { 
+            width: 100%; 
+            margin-top: 40px; 
+            page-break-inside: avoid; 
+        }
+        .tabela-assinaturas {
+            width: 100%;
+            text-align: center;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        .tabela-assinaturas td {
+            width: 50%;
+            padding-top: 40px;
+            padding-bottom: 10px;
+        }
+        .linha-assinatura { 
+            border-top: 1px solid #000; 
+            width: 80%; 
+            margin: 0 auto; 
+            padding-top: 5px; 
+        }
+        .data-local {
+            text-align: center;
+            margin-top: 30px;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
 
-    <div class="logo-container">
-        <h2>JAVIS GAME ACADEMY</h2>
+    <div class="header">
+        <div class="logo-text">JAVIS® GAME ACADEMY</div>
     </div>
 
-    <div class="titulo-principal">
+    <div class="titulo">
         Termo de Compromisso do Aluno
     </div>
 
-    <div class="texto-padrao">
-        Pelo presente instrumento particular, as partes a seguir qualificadas:<br><br>
-        Por meios do <strong>INSTITUTO DO DESENVOLVIMENTO ECONÔMICO, TECNOLÓGICO E CULTURA - IDEC</strong>, sob CNPJ 19.136.591/0001-57, contratando a empresa abaixo para execução do projeto.<br><br>
-        De um lado, pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP: 78050-000 Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
+    <div class="texto-justificado">
+        Pelo presente instrumento particular, as partes a seguir qualificadas:<br>
+        Por meios do <strong>INSTITUTO DO DESENVOLVIMENTO ECONÔMICO, TECNOLÓGICO E CULTURA - IDEC</strong>, sob CNPJ 19.136.591/0001-57, contratando a empresa abaixo para execução do projeto.<br>
+        De um lado, PROJETO DE {{ curso }} pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP: 78050-000 Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
     </div>
 
     <table class="tabela-dados">
         <tr>
-            <td colspan="2"><span class="destaque">Aluno(a):</span> {{ aluno_nome }}</td>
-            <td><span class="destaque">Nasc.:</span> {{ aluno_nascimento }}</td>
+            <td colspan="2"><span class="bold">Aluno(a):</span> {{ aluno_nome }}</td>
+            <td><span class="bold">Nasc.:</span> {{ aluno_nascimento }}</td>
         </tr>
         <tr>
-            <td colspan="2"><span class="destaque">CPF Aluno:</span> {{ aluno_cpf }}</td>
-            <td><span class="destaque">WhatsApp:</span> {{ whatsapp }}</td>
+            <td colspan="2"><span class="bold">CPF Aluno:</span> {{ aluno_cpf }}</td>
+            <td><span class="bold">WhatsApp:</span> {{ whatsapp }}</td>
         </tr>
         <tr>
-            <td colspan="3"><span class="destaque">Endereço:</span> {{ endereco }} - <span class="destaque">Bairro:</span> {{ bairro }} - <span class="destaque">CEP:</span> {{ cep }}</td>
+            <td colspan="3"><span class="bold">Endereço:</span> {{ endereco }} - <span class="bold">Bairro:</span> {{ bairro }} - <span class="bold">CEP:</span> {{ cep }}</td>
         </tr>
         <tr>
-            <td><span class="destaque">Escola:</span> {{ escola_nome }}</td>
-            <td><span class="destaque">Turno:</span> {{ escola_turno }}</td>
-            <td><span class="destaque">Série:</span> {{ escola_serie }}</td>
+            <td style="width: 50%;"><span class="bold">Escola:</span> {{ escola_nome }}</td>
+            <td style="width: 25%;"><span class="bold">Turno:</span> {{ escola_turno }}</td>
+            <td style="width: 25%;"><span class="bold">Série:</span> {{ escola_serie }}</td>
         </tr>
         {% if responsavel_nome %}
         <tr>
-            <td colspan="3" style="background-color: #f9f9f9;"><span class="destaque">Responsável Legal:</span> {{ responsavel_nome }} | <span class="destaque">CPF:</span> {{ responsavel_cpf }} | <span class="destaque">Parentesco:</span> {{ responsavel_parentesco }}</td>
+            <td colspan="3" style="padding-top: 8px;"><span class="bold">Responsável Legal:</span> {{ responsavel_nome }}</td>
+        </tr>
+        <tr>
+            <td colspan="2"><span class="bold">CPF Responsável:</span> {{ responsavel_cpf }}</td>
+            <td><span class="bold">Grau Parentesco:</span> {{ responsavel_parentesco }}</td>
         </tr>
         {% endif %}
     </table>
 
-    <div class="texto-padrao">
+    <div class="texto-justificado" style="margin-bottom: 15px;">
         Resolvem, de comum acordo, celebrar o presente Termo de Compromisso, mediante as cláusulas e condições seguintes:
     </div>
 
     <div class="clausula-titulo">Cláusula Primeira - Do Objeto</div>
-    <div class="texto-padrao">
+    <div class="texto-justificado">
         O presente Termo tem como objeto a concessão de uma bolsa de estudo integral e gratuita para o(a) ALUNO(A) no curso de <strong>{{ curso }}</strong> 
         {% if curso == 'GAME DEV' %}
             com 60h de duração e 6 (seis) meses, 
@@ -1982,32 +2062,87 @@ TEMPLATE_HTML_CONTRATO = """
     </div>
 
     <div class="clausula-titulo">Cláusula Segunda - Das Condições do Curso</div>
-    <div class="texto-padrao">
-        O(A) ALUNO(A) deverá manter uma frequência facial mínima de 75% exigida para a conclusão do curso, bem como obter nota igual ou superior a 7,0 para certificação.
+    <div class="texto-justificado">
+        1. O curso será ministrado com carga horária correspondente ao projeto escolhido.<br>
+        2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP 78050-000 - Cuiabá/MT - Presencial nos dias e horários estipulados pela coordenação.<br>
+        3. O PROJETO DE CURSO DE {{ curso }} se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
     </div>
 
-    <div class="clausula-titulo">Cláusula Terceira - Da Rescisão</div>
-    <div class="texto-padrao">
-        O PROJETO SOCIAL poderá rescindir o Termo de imediato, sem prévio aviso, em caso de descumprimento grave de qualquer das obrigações assumidas pelo (a) ALUNO(A), como por exemplo, falta de frequência injustificada e excessiva, conduta inadequada ou danos intencionais ao patrimônio.
+    <div class="clausula-titulo">Cláusula Terceira - Das Obrigações do(a) Aluno(a)</div>
+    <div class="texto-justificado">
+        O(A) ALUNO(A) compromete-se a:<br>
+        <div class="item-lista">1. Frequentar as aulas e atividades do curso com assiduidade e pontualidade, buscando atingir a frequência facial mínima de 75% exigida para a conclusão do curso.</div>
+        <div class="item-lista">2. Notas e trabalhos para receber a certificação, é necessárias notas igual ou superior a 7,0.</div>
+        <div class="item-lista">3. Participar ativamente das atividades propostas, dedicando-se ao aprendizado e à realização das tarefas e trabalhos solicitados.</div>
+        <div class="item-lista">4. Respeitar as regras e normas de convivência estabelecidas pelo PROJETO SOCIAL, bem como as diretrizes dos professores e coordenadores do curso.</div>
+        <div class="item-lista">5. Zelar pelo patrimônio do PROJETO SOCIAL, utilizando de forma adequada os materiais e equipamentos disponibilizados.</div>
+        <div class="item-lista">6. Comunicar antecipadamente ao PROJETO SOCIAL, sempre que possível, qualquer impossibilidade de comparecimento às aulas ou atividades.</div>
+        <div class="item-lista">7. Manter uma postura ética e respeitosa com os colegas, professores e demais membros da equipe do PROJETO SOCIAL.</div>
+        <div class="item-lista">8. Concluir o curso no prazo estabelecido, cumprindo com todas as exigências acadêmicas.</div>
     </div>
 
-    <div class="texto-padrao" style="margin-top: 30px;">
-        E, por estarem assim justos e contratados, assinam o presente Termo de Compromisso.
+    <div class="clausula-titulo">Cláusula Quarta - Das Obrigações do Projeto Social</div>
+    <div class="texto-justificado">
+        O PROJETO SOCIAL compromete-se a:<br>
+        <div class="item-lista">1. Oferecer o curso de forma gratuita, sem a cobrança de mensalidades ou taxas de matrícula.</div>
+        <div class="item-lista">2. Disponibilizar professores qualificados e material didático adequado ao conteúdo programático.</div>
+        <div class="item-lista">3. Emitir certificado de conclusão ao(à) ALUNO(A) que cumprir com todas as exigências do curso, incluindo frequência e desempenho satisfatório.</div>
+        <div class="item-lista">4. Garantir um ambiente de aprendizado seguro e propício ao desenvolvimento do(a) ALUNO(A).</div>
     </div>
 
-    <table class="assinaturas">
-        <tr>
-            <td class="caixa-assinatura">
-                <div class="linha-ass"></div>
-                Assinatura do Aluno(a)<br>
-                {% if responsavel_nome %} / Responsável Legal {% endif %}
-            </td>
-            <td class="caixa-assinatura">
-                <div class="linha-ass"></div>
-                JAVIS GAME ACADEMY
-            </td>
-        </tr>
-    </table>
+    <div class="clausula-titulo">Cláusula Quinta - Da Rescisão</div>
+    <div class="texto-justificado">
+        O presente Termo poderá ser rescindido, a qualquer tempo, por qualquer das partes, mediante aviso prévio de 15 dias por escrito.<br>
+        O PROJETO SOCIAL poderá rescindir o Termo de imediato, sem prévio aviso, em caso de descumprimento grave de qualquer das obrigações assumidas pelo (a) ALUNO(A) na Cláusula Terceira, como por exemplo, mas não se limitando a:<br>
+        <div class="item-lista">- Falta de frequência injustificada e excessiva.</div>
+        <div class="item-lista">- Conduta inadequada ou desrespeitosa.</div>
+        <div class="item-lista">- Danos intencionais ao patrimônio do PROJETO SOCIAL.</div>
+    </div>
+
+    <div class="clausula-titulo">Cláusula Sexta - Das Disposições Gerais</div>
+    <div class="texto-justificado">
+        <div class="item-lista">1. O presente Termo não gera qualquer vínculo empregatício ou obrigação trabalhista entre o PROJETO SOCIAL e o(a) ALUNO(A).</div>
+        <div class="item-lista">2. Quaisquer alterações ou aditivos a este Termo deverão ser feitos por escrito e assinados por ambas as partes.</div>
+        <div class="item-lista">3. As partes elegem o foro da Comarca de Cuiabá/MT para dirimir quaisquer dúvidas ou litígios decorrentes do presente Termo, com renúncia expressa a qualquer outro, por mais privilegiado que seja.</div>
+    </div>
+
+    <div class="container-assinaturas">
+        <div class="texto-justificado">
+            E, por estarem assim justos e contratados, as partes assinam o presente Termo de Compromisso em 2 (duas) vias de igual teor e forma, na presença das 2 (duas) testemunhas abaixo, para que produza seus devidos efeitos legais.
+        </div>
+
+        <div class="data-local">
+            Cuiabá - MT, ______ de __________________________ de 20____.
+        </div>
+
+        <table class="tabela-assinaturas">
+            <tr>
+                <td>
+                    <div class="linha-assinatura"></div>
+                    <strong>ALUNO(A)</strong><br>
+                    {% if responsavel_nome %} / RESPONSÁVEL LEGAL {% endif %}
+                </td>
+                <td>
+                    <div class="linha-assinatura"></div>
+                    <strong>PROJETO CURSO DE<br>{{ curso }}</strong>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <div class="linha-assinatura"></div>
+                    <strong>Testemunha 1</strong><br>
+                    RG:<br>
+                    CPF:
+                </td>
+                <td>
+                    <div class="linha-assinatura"></div>
+                    <strong>Testemunha 2</strong><br>
+                    RG:<br>
+                    CPF:
+                </td>
+            </tr>
+        </table>
+    </div>
 
 </body>
 </html>
