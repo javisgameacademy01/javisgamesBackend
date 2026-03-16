@@ -2233,11 +2233,10 @@ async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Head
 
 @router.get("/atualizar-pdfs-antigos")
 async def regenerar_todos_os_contratos():
-    """ Rota mágica para atualizar os PDFs antigos """
+    """ Rota administrativa para corrigir PDFs antigos em massa """
     try:
-        resp = supabase.table("tb_geracao_termos").select("*").execute()
-        contratos = resp.data
-        if not contratos: return {"message": "Vazio"}
+        contratos = supabase.table("tb_geracao_termos").select("*").execute().data
+        if not contratos: return {"message": "Nenhum registo encontrado."}
 
         atualizados = 0
         template = Template(TEMPLATE_HTML_CONTRATO)
@@ -2259,7 +2258,7 @@ async def regenerar_todos_os_contratos():
             pdf_io = io.BytesIO()
             pisa.CreatePDF(io.StringIO(html), dest=pdf_io)
             
-            f_nome = f"Refeito_{int(time.time())}_{d['id']}.pdf"
+            f_nome = f"Refeito_{d['id']}_{int(time.time())}.pdf"
             supabase.storage.from_("termos").upload(f_nome, pdf_io.getvalue(), file_options={"content-type": "application/pdf"})
             nova_url = supabase.storage.from_("termos").get_public_url(f_nome)
             
@@ -2267,6 +2266,6 @@ async def regenerar_todos_os_contratos():
             atualizados += 1
             time.sleep(0.3)
 
-        return {"status": "success", "message": f"{atualizados} PDFs atualizados!"}
+        return {"status": "success", "message": f"{atualizados} PDFs foram regenerados com o novo padrão!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
