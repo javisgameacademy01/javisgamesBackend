@@ -42,41 +42,28 @@ from app.modelos import (
 )
 
 class ContratoData(BaseModel):
-    # Dados do Responsável
-    responsavel_nome: str
-    responsavel_cpf: str
-    rg_responsavel: Optional[str] = None
-    rg_data_expedicao: Optional[str] = None
-    rg_orgao_expeditor: Optional[str] = None
-    rg_uf: Optional[str] = None
-    estado_civil: Optional[str] = None
-    profissao: Optional[str] = None
-    sexo_responsavel: Optional[str] = None
-    parentesco: str
-    email_responsavel: str
-    # Endereço Financeiro
-    cep_responsavel: str
-    logradouro_responsavel: str
-    numero_responsavel: str
-    complemento_responsavel: Optional[str] = None
-    bairro_responsavel: str
-    cidade_responsavel: str
-    # Dados do Aluno
-    aluno_nome: str
+    # Campos que o site costuma enviar (tornamos a maioria Optional para não dar erro 422)
+    curso: Optional[str] = None
+    aluno_nome: Optional[str] = None
     aluno_cpf: Optional[str] = None
-    aluno_nascimento: str
-    sexo_aluno: Optional[str] = None
-    nickname_aluno: Optional[str] = None
-    # Acadêmico e Financeiro
-    curso_id: str
-    turma_codigo: str
-    valor_total_negociado: float
-    taxa_matricula: float
-    valor_entrada: float
-    qtd_parcelas: int
-    dia_vencimento: int
-    metodo_pagamento_taxa: Optional[str] = None
-    vendedor_responsavel: Optional[str] = None
+    aluno_nascimento: Optional[str] = None
+    whatsapp: Optional[str] = None
+    email: Optional[str] = None
+    cep: Optional[str] = None
+    endereco: Optional[str] = None
+    bairro: Optional[str] = None
+    escola_nome: Optional[str] = None
+    escola_turno: Optional[str] = None
+    escola_serie: Optional[str] = None
+    
+    # Dados do Responsável (conforme a imagem que você mandou)
+    responsavel_nome: Optional[str] = None
+    responsavel_cpf: Optional[str] = None
+    responsavel_parentesco: Optional[str] = None
+    responsavel_rg: Optional[str] = None
+    responsavel_rg_orgao: Optional[str] = None
+    responsavel_rg_uf: Optional[str] = None
+    responsavel_rg_data: Optional[str] = None
 
 
 # Logger
