@@ -42,21 +42,21 @@ from app.modelos import (
 )
 
 class ContratoData(BaseModel):
-    # Campos que o site costuma enviar (tornamos a maioria Optional para não dar erro 422)
-    curso: Optional[str] = None
-    aluno_nome: Optional[str] = None
+    # Campos que o Site e o Painel enviam
+    curso: str
+    aluno_nome: str
     aluno_cpf: Optional[str] = None
-    aluno_nascimento: Optional[str] = None
+    aluno_nascimento: str
     whatsapp: Optional[str] = None
     email: Optional[str] = None
-    cep: Optional[str] = None
-    endereco: Optional[str] = None
-    bairro: Optional[str] = None
-    escola_nome: Optional[str] = None
-    escola_turno: Optional[str] = None
-    escola_serie: Optional[str] = None
+    cep: str
+    endereco: str
+    bairro: str
+    escola_nome: Optional[str] = "Não Informada"
+    escola_turno: Optional[str] = "N/A"
+    escola_serie: Optional[str] = "N/A"
     
-    # Dados do Responsável (conforme a imagem que você mandou)
+    # Novos Campos do Responsável (RG, etc.)
     responsavel_nome: Optional[str] = None
     responsavel_cpf: Optional[str] = None
     responsavel_parentesco: Optional[str] = None
@@ -64,6 +64,13 @@ class ContratoData(BaseModel):
     responsavel_rg_orgao: Optional[str] = None
     responsavel_rg_uf: Optional[str] = None
     responsavel_rg_data: Optional[str] = None
+    profissao_responsavel: Optional[str] = None
+    
+    # Campos Financeiros (para o banco)
+    valor_total: Optional[float] = 0.0
+    parcelas: Optional[int] = 1
+    vencimento: Optional[int] = 10
+
 
 
 # Logger
