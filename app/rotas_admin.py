@@ -2229,3 +2229,80 @@ async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Head
     except Exception as e:
         logger.error(f"Erro ao gerar contrato PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/atualizar-pdfs-antigos")
+async def regenerar_todos_os_contratos():
+    """ Rota temporária para regravar os PDFs antigos com o novo template """
+    try:
+        # 1. Puxa todos os contratos cadastrados no banco
+        resp = supabase.table("tb_geracao_termos").select("*").execute()
+        contratos = resp.data
+
+        if not contratos:
+            return {"message": "Nenhum contrato encontrado."}
+
+        atualizados = 0
+
+        for dados in contratos:
+            # Pega o nome do curso que está no banco (que você já mudou via SQL)
+            curso_atual = dados.get("curso", "")
+            
+            # TRADUTOR: aplica a regra do nome oficial
+            nome_oficial_curso = "EMPREENDEDORISMO DIGITAL" if curso_atual == "PERFORMANCE GAMER" else curso_atual
+
+            # 2. Renderiza o HTML com os dados que já existiam do aluno
+            template = Template(TEMPLATE_HTML_CONTRATO)
+            html_renderizado = template.render(
+                curso=curso_atual,
+                curso_oficial=nome_oficial_curso,
+                aluno_nome=dados.get("aluno_nome", ""),
+                aluno_cpf=dados.get("aluno_cpf", ""),
+                aluno_nascimento=dados.get("aluno_nascimento", ""),
+                whatsapp=dados.get("whatsapp", ""),
+                endereco=dados.get("endereco", ""),
+                bairro=dados.get("bairro", ""),
+                cep=dados.get("cep", ""),
+                escola_nome=dados.get("escola_nome", ""),
+                escola_turno=dados.get("escola_turno", ""),
+                escola_serie=dados.get("escola_serie", ""),
+                responsavel_nome=dados.get("responsavel_nome", ""),
+                responsavel_cpf=dados.get("responsavel_cpf", ""),
+                responsavel_parentesco=dados.get("responsavel_parentesco", ""),
+                responsavel_rg=dados.get("responsavel_rg", ""),
+                responsavel_rg_orgao=dados.get("responsavel_rg_orgao", "")
+            )
+
+            # 3. Gera o PDF novo
+            pdf_file = io.BytesIO()
+            pisa_status = pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
+            
+            if pisa_status.err:
+                continue # Se der erro num aluno, salta para o próximo
+
+            pdf_bytes = pdf_file.getvalue()
+
+            # 4. Cria um nome de ficheiro novo para não dar conflito
+            nome_limpo = str(dados.get("aluno_nome", "Aluno")).replace(" ", "_")
+            nome_arquivo = f"Contrato_Atualizado_{nome_limpo}_{int(time.time())}.pdf"
+
+            # 5. Faz upload para o Supabase
+            supabase.storage.from_("termos").upload(
+                nome_arquivo, 
+                pdf_bytes, 
+                file_options={"content-type": "application/pdf", "upsert": "true"}
+            )
+
+            # 6. Atualiza a linha do aluno no banco de dados com o link do PDF NOVO
+            nova_url = supabase.storage.from_("termos").get_public_url(nome_arquivo)
+            supabase.table("tb_geracao_termos").update({"url_pdf": nova_url}).eq("id", dados["id"]).execute()
+            
+            atualizados += 1
+            # Pausa de meio segundo para não sobrecarregar o servidor
+            time.sleep(0.5)
+
+        return {"status": "success", "message": f"{atualizados} contratos foram atualizados com sucesso para a nova versão!"}
+
+    except Exception as e:
+        logger.error(f"Erro ao regenerar contratos: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
