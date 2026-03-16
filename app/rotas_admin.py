@@ -1920,7 +1920,6 @@ def admin_listar_professores(authorization: str = Header(None)):
 
 
 # 1. O SEU MODELO HTML DO CONTRATO
-# Você pode estilizar com CSS básico aqui dentro
 TEMPLATE_HTML_CONTRATO = """
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1958,7 +1957,6 @@ TEMPLATE_HTML_CONTRATO = """
             text-align: justify; 
             margin-bottom: 10px; 
         }
-        /* Tabela de dados do aluno parecida com o original */
         .tabela-dados { 
             width: 100%; 
             border-collapse: collapse; 
@@ -1967,11 +1965,6 @@ TEMPLATE_HTML_CONTRATO = """
         .tabela-dados td { 
             padding: 3px 0; 
             vertical-align: bottom;
-        }
-        .linha-dado {
-            border-bottom: 1px solid #000;
-            display: inline-block;
-            width: 100%;
         }
         .bold { 
             font-weight: bold; 
@@ -1987,7 +1980,6 @@ TEMPLATE_HTML_CONTRATO = """
             text-align: justify;
             margin-bottom: 5px;
         }
-        /* Configuração das assinaturas para não quebrarem de página */
         .container-assinaturas { 
             width: 100%; 
             margin-top: 40px; 
@@ -2030,7 +2022,7 @@ TEMPLATE_HTML_CONTRATO = """
     <div class="texto-justificado">
         Pelo presente instrumento particular, as partes a seguir qualificadas:<br>
         Por meios do <strong>INSTITUTO DO DESENVOLVIMENTO ECONÔMICO, TECNOLÓGICO E CULTURA - IDEC</strong>, sob CNPJ 19.136.591/0001-57, contratando a empresa abaixo para execução do projeto.<br>
-        De um lado, PROJETO DE {{ curso }} pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP: 78050-000 Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
+        De um lado, PROJETO DE <strong>{{ curso_oficial }}</strong> pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP: 78050-000 Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
     </div>
 
     <table class="tabela-dados">
@@ -2055,7 +2047,10 @@ TEMPLATE_HTML_CONTRATO = """
             <td colspan="3" style="padding-top: 8px;"><span class="bold">Responsável Legal:</span> {{ responsavel_nome }}</td>
         </tr>
         <tr>
-            <td colspan="2"><span class="bold">CPF Responsável:</span> {{ responsavel_cpf }}</td>
+            <td colspan="2">
+                <span class="bold">CPF:</span> {{ responsavel_cpf }} 
+                {% if responsavel_rg %} | <span class="bold">RG:</span> {{ responsavel_rg }} {{ responsavel_rg_orgao }} {% endif %}
+            </td>
             <td><span class="bold">Grau Parentesco:</span> {{ responsavel_parentesco }}</td>
         </tr>
         {% endif %}
@@ -2067,21 +2062,25 @@ TEMPLATE_HTML_CONTRATO = """
 
     <div class="clausula-titulo">Cláusula Primeira - Do Objeto</div>
     <div class="texto-justificado">
-        O presente Termo tem como objeto a concessão de uma bolsa de estudo integral e gratuita para o(a) ALUNO(A) no curso de <strong>{{ curso }}</strong> 
+        O presente Termo tem como objeto a concessão de uma bolsa de estudo integral e gratuita para o(a) ALUNO(A) no curso de <strong>{{ curso_oficial }}</strong> 
         {% if curso == 'GAME DEV' %}
             com 60h de duração e 6 (seis) meses, 
         {% else %}
-            com duração de 3 (três) meses, 
+            com 30h de duração e 3 (três) meses, 
         {% endif %}
         promovido pelo PROJETO SOCIAL.
     </div>
 
     <div class="clausula-titulo">Cláusula Segunda – Das Condições do Curso</div>
     <div class="texto-justificado">
-        1. O curso será ministrado de _____/____/_______ a _____/____/_______, com carga horária de 60 horas, distribuídas em 24 aulas.<br>
+        {% if curso == 'GAME DEV' %}
+            1. O curso será ministrado de _____/____/_______ a _____/____/_______, com carga horária de 60 horas, distribuídas em 24 aulas.<br>
+        {% else %}
+            1. O curso será ministrado de _____/____/_______ a _____/____/_______, com carga horária de 30 horas, distribuídas em 12 aulas.<br>
+        {% endif %}
         2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde – CEP 78050-000 – Cuiabá/MT – Presencial nos dias e horários abaixo;<br>
         Dias: ___________________ | Horário: _____: _____hs.<br>
-        3. O PROJETO DE CURSO DE <strong>{{ curso }}</strong> se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
+        3. O PROJETO DE CURSO DE <strong>{{ curso_oficial }}</strong> se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
     </div>
 
     <div class="clausula-titulo">Cláusula Terceira - Das Obrigações do(a) Aluno(a)</div>
@@ -2140,7 +2139,7 @@ TEMPLATE_HTML_CONTRATO = """
                 </td>
                 <td>
                     <div class="linha-assinatura"></div>
-                    <strong>PROJETO CURSO DE<br>{{ curso }}</strong>
+                    <strong>PROJETO CURSO DE<br>{{ curso_oficial }}</strong>
                 </td>
             </tr>
             <tr>
@@ -2163,25 +2162,70 @@ TEMPLATE_HTML_CONTRATO = """
 </body>
 </html>
 """
-# Dentro de @router.post("/gerar-contrato-html")
-html_renderizado = template.render(
-    curso=dados.curso,
-    aluno_nome=dados.aluno_nome,
-    aluno_cpf=dados.aluno_cpf,
-    aluno_nascimento=dados.aluno_nascimento,
-    whatsapp=dados.whatsapp,
-    endereco=dados.endereco,
-    bairro=dados.bairro,
-    cep=dados.cep,
-    escola_nome=dados.escola_nome,
-    escola_turno=dados.escola_turno,
-    escola_serie=dados.escola_serie,
-    responsavel_nome=dados.responsavel_nome,
-    responsavel_cpf=dados.responsavel_cpf,
-    responsavel_parentesco=dados.responsavel_parentesco,
-    # ADICIONE ESTES:
-    responsavel_rg=dados.responsavel_rg,
-    responsavel_rg_orgao=dados.responsavel_rg_orgao
-)
 
+# 2. ROTA DE GERAÇÃO E SALVAMENTO
+@router.post("/gerar-contrato-html")
+async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Header(None)):
+    try:
+        # TRADUTOR: Se for o nome comercial, muda para o nome oficial para imprimir no PDF
+        nome_oficial_curso = "EMPREENDEDORISMO DIGITAL" if dados.curso == "PERFORMANCE GAMER" else dados.curso
 
+        # 1. PREPARAR O HTML COM OS DADOS (Jinja2)
+        template = Template(TEMPLATE_HTML_CONTRATO)
+        html_renderizado = template.render(
+            curso=dados.curso,                  # Usado na lógica de horas (60h vs 30h)
+            curso_oficial=nome_oficial_curso,   # Usado para imprimir o nome legal no contrato
+            aluno_nome=dados.aluno_nome,
+            aluno_cpf=dados.aluno_cpf,
+            aluno_nascimento=dados.aluno_nascimento,
+            whatsapp=dados.whatsapp,
+            endereco=dados.endereco,
+            bairro=dados.bairro,
+            cep=dados.cep,
+            escola_nome=dados.escola_nome,
+            escola_turno=dados.escola_turno,
+            escola_serie=dados.escola_serie,
+            responsavel_nome=dados.responsavel_nome,
+            responsavel_cpf=dados.responsavel_cpf,
+            responsavel_parentesco=dados.responsavel_parentesco,
+            responsavel_rg=dados.responsavel_rg,
+            responsavel_rg_orgao=dados.responsavel_rg_orgao
+        )
+
+        # 2. CONVERTER HTML PARA PDF (xhtml2pdf)
+        pdf_file = io.BytesIO()
+        pisa_status = pisa.CreatePDF(
+            io.StringIO(html_renderizado),
+            dest=pdf_file
+        )
+
+        if pisa_status.err:
+            raise Exception("Erro ao converter HTML para PDF")
+
+        pdf_bytes = pdf_file.getvalue()
+
+        # 3. UPLOAD PARA O SUPABASE STORAGE
+        # Cria um nome único com base no nome do aluno e na hora atual para não sobrescrever arquivos
+        nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
+
+        supabase.storage.from_("termos").upload(
+            nome_arquivo, 
+            pdf_bytes, 
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+
+        # 4. PEGAR LINK E SALVAR NO BANCO
+        url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
+
+        # 5. SALVAR NO BANCO DE DADOS
+        dados_db = dados.model_dump()
+        dados_db["url_pdf"] = url_pdf
+        dados_db["visualizado"] = False # Garante que entra como "NOVO PENDENTE" no painel
+
+        res_db = supabase.table("tb_geracao_termos").insert(dados_db).execute()
+
+        return {"status": "success", "url_pdf": url_pdf}
+
+    except Exception as e:
+        logger.error(f"Erro ao gerar contrato PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
