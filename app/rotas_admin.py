@@ -1932,7 +1932,7 @@ TEMPLATE_HTML_CONTRATO = """
             position: absolute;
             top: 250px;     /* Ajusta a altura da logo no fundo */
             left: 100px;    /* Ajusta a posição lateral */
-            width: 500px;   /* Largura da logo de fundo */
+            width: 450px;   /* Largura da logo de fundo */
             z-index: -1000; /* Garante que fica atrás do texto */
             opacity: 0.1;   /* Deixa a imagem bem clarinha (marca d'água) */
         }
@@ -1955,6 +1955,10 @@ TEMPLATE_HTML_CONTRATO = """
             font-weight: bold; 
             margin: 0; 
             padding: 0; 
+        }
+        .logo-img {
+            max-width: 300px; /* Aumente para 300px ou diminua para 200px conforme preferir */
+            height: auto;     /* Isso mantém a proporção correta para não amassar a imagem */
         }
         .titulo { 
             text-align: center; 
