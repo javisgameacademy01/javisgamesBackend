@@ -2079,7 +2079,15 @@ TEMPLATE_HTML_CONTRATO = """
             com carga horária de 30 horas, distribuídas em 12 aulas.<br>
         {% endif %}
         2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde CEP 78050-000- Cuiabá/MT - Presencial nos dias e horários abaixo;<br>
-        <strong>Horário das Aulas: {{ horario_aula }}</strong><br>
+        
+        <strong>Horário das Aulas: 
+            {% if horario_aula == 'A combinar' or horario_aula == 'A combinar com a coordenação' or not horario_aula %}
+                ________________________________________
+            {% else %}
+                {{ horario_aula }}
+            {% endif %}
+        </strong><br>
+        
         3. O PROJETO DE CURSO DE <strong>{{ curso_oficial }}</strong> se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
     </div>
 
@@ -2160,18 +2168,24 @@ TEMPLATE_HTML_CONTRATO = """
 </html>
 """
 
-# 2. ROTA DE GERAÇÃO E SALVAMENTO
 @router.post("/gerar-contrato-html")
 async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Header(None)):
     try:
-        # Define o nome oficial conforme o curso selecionado
+        # 1. Define o nome oficial para o cabeçalho do contrato
         nome_oficial_curso = "EMPREENDEDORISMO DIGITAL" if dados.curso == "PERFORMANCE GAMER" else dados.curso
 
+        # 2. LÓGICA DE TRATAMENTO DO HORÁRIO:
+        # Se vier vazio ou um valor padrão, limpamos para "A combinar" para disparar a linha ______ no template
+        horario_limpo = dados.horario_aula
+        if not horario_limpo or horario_limpo in ["A definir", "A combinar", "A combinar com a coordenação"]:
+            horario_limpo = "A combinar"
+
+        # 3. Renderiza o HTML com o template integral
         template = Template(TEMPLATE_HTML_CONTRATO)
         html_renderizado = template.render(
             curso=dados.curso,
             curso_oficial=nome_oficial_curso,
-            horario_aula=dados.horario_aula,      # LINHA OBRIGATÓRIA: Envia o horário para o PDF
+            horario_aula=horario_limpo,  # Passa o valor já tratado
             aluno_nome=dados.aluno_nome,
             aluno_cpf=dados.aluno_cpf,
             aluno_nascimento=dados.aluno_nascimento,
@@ -2189,15 +2203,23 @@ async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Head
             responsavel_rg_orgao=dados.responsavel_rg_orgao
         )
 
+        # 4. Gera o PDF
         pdf_file = io.BytesIO()
         pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
         pdf_bytes = pdf_file.getvalue()
 
+        # 5. Faz upload para o Supabase Storage
         nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
-        supabase.storage.from_("termos").upload(nome_arquivo, pdf_bytes, file_options={"content-type": "application/pdf", "upsert": "true"})
+        supabase.storage.from_("termos").upload(
+            nome_arquivo, 
+            pdf_bytes, 
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+
+        # 6. Pega a URL pública
         url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
 
-        # Guarda no banco de dados (o horario_aula será incluído automaticamente se a coluna já existir)
+        # 7. Salva o registro completo na tabela tb_geracao_termos
         dados_db = dados.model_dump()
         dados_db["url_pdf"] = url_pdf
         dados_db["visualizado"] = False 
@@ -2209,28 +2231,34 @@ async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Head
         logger.error(f"Erro ao gerar contrato PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/atualizar-pdfs-antigos")
 async def regenerar_todos_os_contratos():
-    """ Rota administrativa para corrigir PDFs antigos em massa """
+    """ Rota administrativa para corrigir PDFs antigos em massa com a lógica de horários """
     try:
+        # Busca todos os contratos já cadastrados
         contratos = supabase.table("tb_geracao_termos").select("*").execute().data
-        if not contratos: return {"message": "Nenhum registo encontrado."}
+        if not contratos: 
+            return {"message": "Nenhum registo encontrado."}
 
         atualizados = 0
         template = Template(TEMPLATE_HTML_CONTRATO)
 
         for d in contratos:
+            # Tradução do curso
             c_nome = d.get("curso", "")
             oficial = "EMPREENDEDORISMO DIGITAL" if c_nome == "PERFORMANCE GAMER" else c_nome
             
-            # Tenta pegar o horário do banco; se não existir (alunos antigos), coloca "A combinar"
-            horario_aluno = d.get("horario_aula") or "A combinar com a coordenação"
+            # --- O BLOCO QUE VOCÊ PEDIU (Lógica de Limpeza de Horário) ---
+            horario_aluno = d.get("horario_aula")
+            if not horario_aluno or horario_aluno in ["A definir", "A combinar", "A combinar com a coordenação"]:
+                horario_aluno = "A combinar" # Isto dispara a linha _________________ no PDF
+            # -------------------------------------------------------------
 
+            # Renderiza o PDF para o aluno atual
             html = template.render(
                 curso=c_nome,
                 curso_oficial=oficial,
-                horario_aula=horario_aluno, # LINHA OBRIGATÓRIA: Passa o horário para o PDF
+                horario_aula=horario_aluno, # Aplica o horário tratado aqui
                 aluno_nome=d.get("aluno_nome"),
                 aluno_cpf=d.get("aluno_cpf"),
                 aluno_nascimento=d.get("aluno_nascimento"),
@@ -2248,17 +2276,28 @@ async def regenerar_todos_os_contratos():
                 responsavel_rg_orgao=d.get("responsavel_rg_orgao")
             )
 
+            # Processo técnico de criação do arquivo
             pdf_io = io.BytesIO()
             pisa.CreatePDF(io.StringIO(html), dest=pdf_io)
             
+            # Nome único para o novo arquivo
             f_nome = f"Refeito_{d['id']}_{int(time.time())}.pdf"
-            supabase.storage.from_("termos").upload(f_nome, pdf_io.getvalue(), file_options={"content-type": "application/pdf"})
-            nova_url = supabase.storage.from_("termos").get_public_url(f_nome)
+            supabase.storage.from_("termos").upload(
+                f_nome, 
+                pdf_io.getvalue(), 
+                file_options={"content-type": "application/pdf"}
+            )
             
+            # Atualiza o link do PDF na linha do aluno no banco de dados
+            nova_url = supabase.storage.from_("termos").get_public_url(f_nome)
             supabase.table("tb_geracao_termos").update({"url_pdf": nova_url}).eq("id", d["id"]).execute()
+            
             atualizados += 1
+            # Pausa curta para não sobrecarregar o servidor do Render
             time.sleep(0.3)
 
-        return {"status": "success", "message": f"{atualizados} PDFs foram regenerados com o novo padrão e horários!"}
+        return {"status": "success", "message": f"{atualizados} contratos regenerados com sucesso com a nova lógica visual!"}
+
     except Exception as e:
+        logger.error(f"Erro na regeneração em massa: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
