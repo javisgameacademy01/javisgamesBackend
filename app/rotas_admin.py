@@ -45,6 +45,7 @@ class ContratoData(BaseModel):
     # Campos que o Site e o Painel enviam
     curso: str
     aluno_nome: str
+    horario_aula: Optional[str] = "A definir"  # ADICIONADO AQUI
     aluno_cpf: Optional[str] = None
     aluno_nascimento: str
     whatsapp: Optional[str] = None
@@ -70,7 +71,6 @@ class ContratoData(BaseModel):
     valor_total: Optional[float] = 0.0
     parcelas: Optional[int] = 1
     vencimento: Optional[int] = 10
-
 
 
 # Logger
@@ -1919,16 +1919,15 @@ def admin_listar_professores(authorization: str = Header(None)):
         return []
 
 
-# 1. O SEU MODELO HTML DO CONTRATO
 TEMPLATE_HTML_CONTRATO = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <style>
-        @page {
-            size: A4;
-            margin: 2cm 2cm 2.5cm 2cm;
+        @page { 
+            size: A4; 
+            margin: 2cm 2cm 2.5cm 2cm; 
         }
         body { 
             font-family: Helvetica, Arial, sans-serif; 
@@ -1940,17 +1939,17 @@ TEMPLATE_HTML_CONTRATO = """
             text-align: center; 
             margin-bottom: 15px; 
         }
-        .logo-text {
-            font-size: 16pt;
-            font-weight: bold;
-            margin: 0;
-            padding: 0;
+        .logo-text { 
+            font-size: 16pt; 
+            font-weight: bold; 
+            margin: 0; 
+            padding: 0; 
         }
         .titulo { 
             text-align: center; 
             font-size: 12pt; 
             font-weight: bold; 
-            text-decoration: underline;
+            text-decoration: underline; 
             margin-bottom: 20px; 
         }
         .texto-justificado { 
@@ -1964,7 +1963,7 @@ TEMPLATE_HTML_CONTRATO = """
         }
         .tabela-dados td { 
             padding: 3px 0; 
-            vertical-align: bottom;
+            vertical-align: bottom; 
         }
         .bold { 
             font-weight: bold; 
@@ -1973,28 +1972,28 @@ TEMPLATE_HTML_CONTRATO = """
             font-weight: bold; 
             margin-top: 15px; 
             margin-bottom: 5px; 
-            text-decoration: underline;
+            text-decoration: underline; 
         }
-        .item-lista {
-            margin-left: 20px;
-            text-align: justify;
-            margin-bottom: 5px;
+        .item-lista { 
+            margin-left: 20px; 
+            text-align: justify; 
+            margin-bottom: 5px; 
         }
         .container-assinaturas { 
             width: 100%; 
             margin-top: 40px; 
             page-break-inside: avoid; 
         }
-        .tabela-assinaturas {
-            width: 100%;
-            text-align: center;
-            margin-top: 20px;
-            border-collapse: collapse;
+        .tabela-assinaturas { 
+            width: 100%; 
+            text-align: center; 
+            margin-top: 20px; 
+            border-collapse: collapse; 
         }
-        .tabela-assinaturas td {
-            width: 50%;
-            padding-top: 40px;
-            padding-bottom: 10px;
+        .tabela-assinaturas td { 
+            width: 50%; 
+            padding-top: 40px; 
+            padding-bottom: 10px; 
         }
         .linha-assinatura { 
             border-top: 1px solid #000; 
@@ -2002,17 +2001,17 @@ TEMPLATE_HTML_CONTRATO = """
             margin: 0 auto; 
             padding-top: 5px; 
         }
-        .data-local {
-            text-align: center;
-            margin-top: 30px;
-            margin-bottom: 20px;
+        .data-local { 
+            text-align: center; 
+            margin-top: 30px; 
+            margin-bottom: 20px; 
         }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <div class="logo-text">JAVIS® GAME ACADEMY</div>
+        <div class="logo-text">JNVIS® GAME ACADEMY</div>
     </div>
 
     <div class="titulo">
@@ -2022,12 +2021,12 @@ TEMPLATE_HTML_CONTRATO = """
     <div class="texto-justificado">
         Pelo presente instrumento particular, as partes a seguir qualificadas:<br>
         Por meios do <strong>INSTITUTO DO DESENVOLVIMENTO ECONÔMICO, TECNOLÓGICO E CULTURA - IDEC</strong>, sob CNPJ 19.136.591/0001-57, contratando a empresa abaixo para execução do projeto.<br>
-        De um lado, PROJETO DE <strong>{{ curso_oficial }}</strong> pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP: 78050-000 Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
+        De um lado, <strong>PROJETO DE {{ curso_oficial }}</strong> pessoa jurídica de direito privado, inscrita no CNPJ sob o nº 46.422.995/0001-80 com sede em Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP 78050-000- Cuiabá/MT, doravante denominada <strong>JAVIS GAME ACADEMY</strong>.
     </div>
 
     <table class="tabela-dados">
         <tr>
-            <td colspan="2"><span class="bold">Aluno(a):</span> {{ aluno_nome }}</td>
+            <td colspan="2"><span class="bold">Aluno:</span> {{ aluno_nome }}</td>
             <td><span class="bold">Nasc.:</span> {{ aluno_nascimento }}</td>
         </tr>
         <tr>
@@ -2038,7 +2037,7 @@ TEMPLATE_HTML_CONTRATO = """
             <td colspan="3"><span class="bold">Endereço:</span> {{ endereco }} - <span class="bold">Bairro:</span> {{ bairro }} - <span class="bold">CEP:</span> {{ cep }}</td>
         </tr>
         <tr>
-            <td style="width: 50%;"><span class="bold">Escola:</span> {{ escola_nome }}</td>
+            <td style="width: 50%;"><span class="bold">Nome da Escola:</span> {{ escola_nome }}</td>
             <td style="width: 25%;"><span class="bold">Turno:</span> {{ escola_turno }}</td>
             <td style="width: 25%;"><span class="bold">Série:</span> {{ escola_serie }}</td>
         </tr>
@@ -2056,8 +2055,8 @@ TEMPLATE_HTML_CONTRATO = """
         {% endif %}
     </table>
 
-    <div class="texto-justificado" style="margin-bottom: 15px;">
-        Resolvem, de comum acordo, celebrar o presente Termo de Compromisso, mediante as cláusulas e condições seguintes:
+    <div class="texto-justificado">
+        Resolvem, de comum acordo, celebrar le presente Termo de Compromisso, mediante as cláusulas e condições seguintes:
     </div>
 
     <div class="clausula-titulo">Cláusula Primeira - Do Objeto</div>
@@ -2066,26 +2065,27 @@ TEMPLATE_HTML_CONTRATO = """
         {% if curso == 'GAME DEV' %}
             com 60h de duração e 6 (seis) meses, 
         {% else %}
-            com 30h de duração e 3 (três) meses, 
+            com duração de 3 (três) meses, 
         {% endif %}
         promovido pelo PROJETO SOCIAL.
     </div>
 
-    <div class="clausula-titulo">Cláusula Segunda – Das Condições do Curso</div>
+    <div class="clausula-titulo">Cláusula Segunda - Das Condições do Curso</div>
     <div class="texto-justificado">
+        1. O curso será ministrado de _____/____/_______ a _____/____/_______, 
         {% if curso == 'GAME DEV' %}
-            1. O curso será ministrado de _____/____/_______ a _____/____/_______, com carga horária de 60 horas, distribuídas em 24 aulas.<br>
+            com carga horária de 60 horas, distribuídas em 24 aulas.<br>
         {% else %}
-            1. O curso será ministrado de _____/____/_______ a _____/____/_______, com carga horária de 30 horas, distribuídas em 12 aulas.<br>
+            com carga horária de 30 horas, distribuídas em 12 aulas.<br>
         {% endif %}
-        2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde – CEP 78050-000 – Cuiabá/MT – Presencial nos dias e horários abaixo;<br>
-        Dias: ___________________ | Horário: _____: _____hs.<br>
+        2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde CEP 78050-000- Cuiabá/MT - Presencial nos dias e horários abaixo;<br>
+        <strong>Horário das Aulas: {{ horario_aula }}</strong><br>
         3. O PROJETO DE CURSO DE <strong>{{ curso_oficial }}</strong> se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
     </div>
 
     <div class="clausula-titulo">Cláusula Terceira - Das Obrigações do(a) Aluno(a)</div>
     <div class="texto-justificado">
-        O(A) ALUNO(A) compromete-se a:<br>
+        O(A) ALUNO(A) compromete-se a:
         <div class="item-lista">1. Frequentar as aulas e atividades do curso com assiduidade e pontualidade, buscando atingir a frequência facial mínima de 75% exigida para a conclusão do curso.</div>
         <div class="item-lista">2. Notas e trabalhos para receber a certificação, é necessárias notas igual ou superior a 7,0.</div>
         <div class="item-lista">3. Participar ativamente das atividades propostas, dedicando-se ao aprendizado e à realização das tarefas e trabalhos solicitados.</div>
@@ -2098,7 +2098,7 @@ TEMPLATE_HTML_CONTRATO = """
 
     <div class="clausula-titulo">Cláusula Quarta - Das Obrigações do Projeto Social</div>
     <div class="texto-justificado">
-        O PROJETO SOCIAL compromete-se a:<br>
+        O PROJETO SOCIAL compromete-se a:
         <div class="item-lista">1. Oferecer o curso de forma gratuita, sem a cobrança de mensalidades ou taxas de matrícula.</div>
         <div class="item-lista">2. Disponibilizar professores qualificados e material didático adequado ao conteúdo programático.</div>
         <div class="item-lista">3. Emitir certificado de conclusão ao(à) ALUNO(A) que cumprir com todas as exigências do curso, incluindo frequência e desempenho satisfatório.</div>
@@ -2108,10 +2108,10 @@ TEMPLATE_HTML_CONTRATO = """
     <div class="clausula-titulo">Cláusula Quinta - Da Rescisão</div>
     <div class="texto-justificado">
         O presente Termo poderá ser rescindido, a qualquer tempo, por qualquer das partes, mediante aviso prévio de 15 dias por escrito.<br>
-        O PROJETO SOCIAL poderá rescindir o Termo de imediato, sem prévio aviso, em caso de descumprimento grave de qualquer das obrigações assumidas pelo (a) ALUNO(A) na Cláusula Terceira, como por exemplo, mas não se limitando a:<br>
-        <div class="item-lista">- Falta de frequência injustificada e excessiva.</div>
-        <div class="item-lista">- Conduta inadequada ou desrespeitosa.</div>
-        <div class="item-lista">- Danos intencionais ao patrimônio do PROJETO SOCIAL.</div>
+        O PROJETO SOCIAL poderá rescindir o Termo de imediato, sem prévio aviso, em caso de descumprimento grave de qualquer das obrigações assumidas pelo (a) ALUNO(A) na Cláusula Terceira, como por exemplo, mas não se limitando a:
+        <div class="item-lista">• Falta de frequência injustificada e excessiva.</div>
+        <div class="item-lista">• Conduta inadequada ou desrespeitosa.</div>
+        <div class="item-lista">• Danos intencionais ao patrimônio do PROJETO SOCIAL.</div>
     </div>
 
     <div class="clausula-titulo">Cláusula Sexta - Das Disposições Gerais</div>
@@ -2134,8 +2134,7 @@ TEMPLATE_HTML_CONTRATO = """
             <tr>
                 <td>
                     <div class="linha-assinatura"></div>
-                    <strong>ALUNO(A)</strong><br>
-                    {% if responsavel_nome %} / RESPONSÁVEL LEGAL {% endif %}
+                    <strong>ALUNO(A) / RESPONSÁVEL LEGAL</strong>
                 </td>
                 <td>
                     <div class="linha-assinatura"></div>
@@ -2145,15 +2144,13 @@ TEMPLATE_HTML_CONTRATO = """
             <tr>
                 <td>
                     <div class="linha-assinatura"></div>
-                    <strong>Testemunha 1</strong><br>
-                    RG:<br>
-                    CPF:
+                    <strong>Testemunhas 1</strong><br>
+                    RG: / CPF:
                 </td>
                 <td>
                     <div class="linha-assinatura"></div>
-                    <strong>Testemunha 2</strong><br>
-                    RG:<br>
-                    CPF:
+                    <strong>Testemunhas 2</strong><br>
+                    RG: / CPF:
                 </td>
             </tr>
         </table>
@@ -2167,14 +2164,14 @@ TEMPLATE_HTML_CONTRATO = """
 @router.post("/gerar-contrato-html")
 async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Header(None)):
     try:
-        # TRADUTOR: Se for o nome comercial, muda para o nome oficial para imprimir no PDF
+        # Define o nome oficial conforme o curso selecionado
         nome_oficial_curso = "EMPREENDEDORISMO DIGITAL" if dados.curso == "PERFORMANCE GAMER" else dados.curso
 
-        # 1. PREPARAR O HTML COM OS DADOS (Jinja2)
         template = Template(TEMPLATE_HTML_CONTRATO)
         html_renderizado = template.render(
-            curso=dados.curso,                  # Usado na lógica de horas (60h vs 30h)
-            curso_oficial=nome_oficial_curso,   # Usado para imprimir o nome legal no contrato
+            curso=dados.curso,
+            curso_oficial=nome_oficial_curso,
+            horario_aula=dados.horario_aula,      # LINHA OBRIGATÓRIA: Envia o horário para o PDF
             aluno_nome=dados.aluno_nome,
             aluno_cpf=dados.aluno_cpf,
             aluno_nascimento=dados.aluno_nascimento,
@@ -2192,37 +2189,19 @@ async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Head
             responsavel_rg_orgao=dados.responsavel_rg_orgao
         )
 
-        # 2. CONVERTER HTML PARA PDF (xhtml2pdf)
         pdf_file = io.BytesIO()
-        pisa_status = pisa.CreatePDF(
-            io.StringIO(html_renderizado),
-            dest=pdf_file
-        )
-
-        if pisa_status.err:
-            raise Exception("Erro ao converter HTML para PDF")
-
+        pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
         pdf_bytes = pdf_file.getvalue()
 
-        # 3. UPLOAD PARA O SUPABASE STORAGE
-        # Cria um nome único com base no nome do aluno e na hora atual para não sobrescrever arquivos
         nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
-
-        supabase.storage.from_("termos").upload(
-            nome_arquivo, 
-            pdf_bytes, 
-            file_options={"content-type": "application/pdf", "upsert": "true"}
-        )
-
-        # 4. PEGAR LINK E SALVAR NO BANCO
+        supabase.storage.from_("termos").upload(nome_arquivo, pdf_bytes, file_options={"content-type": "application/pdf", "upsert": "true"})
         url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
 
-        # 5. SALVAR NO BANCO DE DADOS
+        # Guarda no banco de dados (o horario_aula será incluído automaticamente se a coluna já existir)
         dados_db = dados.model_dump()
         dados_db["url_pdf"] = url_pdf
-        dados_db["visualizado"] = False # Garante que entra como "NOVO PENDENTE" no painel
-
-        res_db = supabase.table("tb_geracao_termos").insert(dados_db).execute()
+        dados_db["visualizado"] = False 
+        supabase.table("tb_geracao_termos").insert(dados_db).execute()
 
         return {"status": "success", "url_pdf": url_pdf}
 
@@ -2245,14 +2224,28 @@ async def regenerar_todos_os_contratos():
             c_nome = d.get("curso", "")
             oficial = "EMPREENDEDORISMO DIGITAL" if c_nome == "PERFORMANCE GAMER" else c_nome
             
+            # Tenta pegar o horário do banco; se não existir (alunos antigos), coloca "A combinar"
+            horario_aluno = d.get("horario_aula") or "A combinar com a coordenação"
+
             html = template.render(
-                curso=c_nome, curso_oficial=oficial, aluno_nome=d.get("aluno_nome"),
-                aluno_cpf=d.get("aluno_cpf"), aluno_nascimento=d.get("aluno_nascimento"),
-                whatsapp=d.get("whatsapp"), endereco=d.get("endereco"), bairro=d.get("bairro"),
-                cep=d.get("cep"), escola_nome=d.get("escola_nome"), escola_turno=d.get("escola_turno"),
-                escola_serie=d.get("escola_serie"), responsavel_nome=d.get("responsavel_nome"),
-                responsavel_cpf=d.get("responsavel_cpf"), responsavel_parentesco=d.get("responsavel_parentesco"),
-                responsavel_rg=d.get("responsavel_rg"), responsavel_rg_orgao=d.get("responsavel_rg_orgao")
+                curso=c_nome,
+                curso_oficial=oficial,
+                horario_aula=horario_aluno, # LINHA OBRIGATÓRIA: Passa o horário para o PDF
+                aluno_nome=d.get("aluno_nome"),
+                aluno_cpf=d.get("aluno_cpf"),
+                aluno_nascimento=d.get("aluno_nascimento"),
+                whatsapp=d.get("whatsapp"),
+                endereco=d.get("endereco"),
+                bairro=d.get("bairro"),
+                cep=d.get("cep"),
+                escola_nome=d.get("escola_nome"),
+                escola_turno=d.get("escola_turno"),
+                escola_serie=d.get("escola_serie"),
+                responsavel_nome=d.get("responsavel_nome"),
+                responsavel_cpf=d.get("responsavel_cpf"),
+                responsavel_parentesco=d.get("responsavel_parentesco"),
+                responsavel_rg=d.get("responsavel_rg"),
+                responsavel_rg_orgao=d.get("responsavel_rg_orgao")
             )
 
             pdf_io = io.BytesIO()
@@ -2266,6 +2259,6 @@ async def regenerar_todos_os_contratos():
             atualizados += 1
             time.sleep(0.3)
 
-        return {"status": "success", "message": f"{atualizados} PDFs foram regenerados com o novo padrão!"}
+        return {"status": "success", "message": f"{atualizados} PDFs foram regenerados com o novo padrão e horários!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
