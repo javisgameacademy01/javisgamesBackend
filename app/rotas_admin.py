@@ -2225,3 +2225,36 @@ async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Head
     except Exception as e:
         logger.error(f"Erro ao gerar contrato PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/gerar-contrato-matricula")
+def salvar_dados_contrato(dados: ContratoData, authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+
+    try:
+        # Salva o registro na tb_geracao_termos
+        resp = supabase.table("tb_geracao_termos").insert({
+            "nome_responsavel": dados.responsavel_nome,
+            "cpf_responsavel": dados.responsavel_cpf,
+            "rg_responsavel": dados.rg_responsavel,
+            "rg_orgao_expeditor": dados.rg_orgao_expeditor,
+            "parentesco": dados.parentesco,
+            "email_responsavel": dados.email_responsavel,
+            "cep_responsavel": dados.cep_responsavel,
+            "logradouro_responsavel": dados.logradouro_responsavel,
+            "numero_responsavel": dados.numero_responsavel,
+            "nome_aluno": dados.aluno_nome,
+            "nickname_aluno": dados.nickname_aluno,
+            "valor_total_negociado": dados.valor_total_negociado,
+            "qtd_parcelas": dados.qtd_parcelas,
+            "dia_vencimento": dados.dia_vencimento,
+            "vendedor_responsavel": dados.vendedor_responsavel,
+            "id_unidade": ctx['id_unidade']
+        }).execute()
+        
+        return {"message": "Contrato registrado com sucesso!", "id": resp.data[0]['id']}
+    except Exception as e:
+        logger.error(f"Erro ao salvar contrato: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
