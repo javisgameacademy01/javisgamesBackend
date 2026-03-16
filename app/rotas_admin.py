@@ -2163,61 +2163,27 @@ TEMPLATE_HTML_CONTRATO = """
 </html>
 """
 
-@router.post("/gerar-contrato-html")
-async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Header(None)):
-    try:
-        # 1. PREPARAR O HTML COM OS DADOS (Jinja2)
-        template = Template(TEMPLATE_HTML_CONTRATO)
-        html_renderizado = template.render(
-            curso=dados.curso,
-            aluno_nome=dados.aluno_nome,
-            aluno_cpf=dados.aluno_cpf,
-            aluno_nascimento=dados.aluno_nascimento,
-            whatsapp=dados.whatsapp,
-            endereco=dados.endereco,
-            bairro=dados.bairro,
-            cep=dados.cep,
-            escola_nome=dados.escola_nome,
-            escola_turno=dados.escola_turno,
-            escola_serie=dados.escola_serie,
-            responsavel_nome=dados.responsavel_nome,
-            responsavel_cpf=dados.responsavel_cpf,
-            responsavel_parentesco=dados.responsavel_parentesco
-        )
-
-        # 2. CONVERTER HTML PARA PDF (xhtml2pdf)
-        pdf_file = io.BytesIO()
-        pisa_status = pisa.CreatePDF(
-            io.StringIO(html_renderizado),
-            dest=pdf_file
-        )
-
-        if pisa_status.err:
-            raise Exception("Erro ao converter HTML para PDF")
-
-        pdf_bytes = pdf_file.getvalue()
-
-        # 3. UPLOAD PARA O SUPABASE STORAGE
-        nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
-        
-        supabase.storage.from_("termos").upload(
-            nome_arquivo, 
-            pdf_bytes, 
-            file_options={"content-type": "application/pdf", "upsert": "true"}
-        )
-
-        # 4. PEGAR LINK E SALVAR NO BANCO
-        url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
-
-        dados_db = dados.model_dump()
-        dados_db["url_pdf"] = url_pdf
-        
-        res_db = supabase.table("tb_geracao_termos").insert(dados_db).execute()
-
-        return {"status": "success", "url_pdf": url_pdf}
-
-    except Exception as e:
-        logger.error(f"Erro ao gerar contrato PDF: {str(e)}")
+# Dentro de @router.post("/gerar-contrato-html")
+html_renderizado = template.render(
+    curso=dados.curso,
+    aluno_nome=dados.aluno_nome,
+    aluno_cpf=dados.aluno_cpf,
+    aluno_nascimento=dados.aluno_nascimento,
+    whatsapp=dados.whatsapp,
+    endereco=dados.endereco,
+    bairro=dados.bairro,
+    cep=dados.cep,
+    escola_nome=dados.escola_nome,
+    escola_turno=dados.escola_turno,
+    escola_serie=dados.escola_serie,
+    responsavel_nome=dados.responsavel_nome,
+    responsavel_cpf=dados.responsavel_cpf,
+    responsavel_parentesco=dados.responsavel_parentesco,
+    # ADICIONE ESTES:
+    responsavel_rg=dados.responsavel_rg,
+    responsavel_rg_orgao=dados.responsavel_rg_orgao
+)
+ PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/gerar-contrato-matricula")
