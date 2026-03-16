@@ -2011,7 +2011,7 @@ TEMPLATE_HTML_CONTRATO = """
 <body>
 
     <div class="header">
-        <div class="logo-text">JNVIS® GAME ACADEMY</div>
+        <div class="logo-text">JAVIS® GAME ACADEMY</div>
     </div>
 
     <div class="titulo">
