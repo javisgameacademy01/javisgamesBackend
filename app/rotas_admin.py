@@ -1938,27 +1938,28 @@ TEMPLATE_HTML_CONTRATO = """
             line-height: 1.4; 
         }
 
-        /* CONFIGURAÇÃO DA MARCA D'ÁGUA (FUNDOS) */
+        /* MARCA D'ÁGUA AO FUNDO */
         #background {
             position: absolute;
-            top: 300px;
-            left: 50px;
-            width: 500px;
-            z-index: -1; /* Tenta jogar para trás */
+            top: 25%;      /* Ajusta a altura da marca d'água */
+            left: 5%;      
+            width: 90%;    
+            text-align: center;
         }
         #background img {
-            width: 100%;
-            /* A imagem Base64 deve ser enviada com transparência de 10% */
+            width: 480px;  
+            /* A imagem deve ter 10% de opacidade no ficheiro original */
         }
 
-        /* LOGO DO TOPO */
         .header { 
             text-align: center; 
-            margin-bottom: 20px; 
-            display: block;
+            margin-bottom: 25px; 
         }
-        .logo-img {
-            width: 280px; /* Tamanho ajustado da logo no topo */
+        .logo-text {
+            font-size: 18pt; /* Tamanho do nome no topo */
+            font-weight: bold;
+            margin: 0;
+            padding: 0;
         }
 
         .titulo { text-align: center; font-size: 12pt; font-weight: bold; text-decoration: underline; margin-bottom: 20px; }
@@ -1981,7 +1982,7 @@ TEMPLATE_HTML_CONTRATO = """
     </div>
 
     <div class="header">
-        <img src="{{ logo_javis }}" class="logo-img">
+        <div class="logo-text">JAVIS® GAME ACADEMY</div>
     </div>
 
     <div class="titulo">Termo de Compromisso do Aluno</div>
