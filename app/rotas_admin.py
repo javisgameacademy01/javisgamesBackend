@@ -1927,15 +1927,6 @@ TEMPLATE_HTML_CONTRATO = """
 <head>
     <meta charset="UTF-8">
     <style>
-        /* Estilo para a imagem de fundo */
-        #background {
-            position: absolute;
-            top: 250px;     /* Ajusta a altura da logo no fundo */
-            left: 100px;    /* Ajusta a posição lateral */
-            width: 450px;   /* Largura da logo de fundo */
-            z-index: -1000; /* Garante que fica atrás do texto */
-            opacity: 0.1;   /* Deixa a imagem bem clarinha (marca d'água) */
-        }
         @page { 
             size: A4; 
             margin: 2cm 2cm 2.5cm 2cm; 
@@ -1946,95 +1937,45 @@ TEMPLATE_HTML_CONTRATO = """
             color: #000; 
             line-height: 1.4; 
         }
-        .header { 
-            text-align: center; 
-            margin-bottom: 15px; 
+
+        /* TÉCNICA PARA O FUNDO (MARCA D'ÁGUA) */
+        #background {
+            position: absolute;
+            top: 20%;      /* Ajusta a posição vertical (mais para baixo) */
+            left: 5%;      /* Ajusta a posição horizontal */
+            width: 90%;    /* Ocupa quase toda a largura para centralizar */
+            text-align: center;
         }
-        .logo-text { 
-            font-size: 16pt; 
-            font-weight: bold; 
-            margin: 0; 
-            padding: 0; 
+        #background img {
+            width: 500px;  /* Tamanho da marca d'água */
+            /* IMPORTANTE: A imagem Base64 já deve estar com 10% de opacidade */
         }
-        .logo-img {
-            max-width: 300px; /* Aumente para 300px ou diminua para 200px conforme preferir */
-            height: auto;     /* Isso mantém a proporção correta para não amassar a imagem */
-        }
-        .titulo { 
-            text-align: center; 
-            font-size: 12pt; 
-            font-weight: bold; 
-            text-decoration: underline; 
-            margin-bottom: 20px; 
-        }
-        .texto-justificado { 
-            text-align: justify; 
-            margin-bottom: 10px; 
-        }
-        .tabela-dados { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin-bottom: 15px; 
-        }
-        .tabela-dados td { 
-            padding: 3px 0; 
-            vertical-align: bottom; 
-        }
-        .bold { 
-            font-weight: bold; 
-        }
-        .clausula-titulo { 
-            font-weight: bold; 
-            margin-top: 15px; 
-            margin-bottom: 5px; 
-            text-decoration: underline; 
-        }
-        .item-lista { 
-            margin-left: 20px; 
-            text-align: justify; 
-            margin-bottom: 5px; 
-        }
-        .container-assinaturas { 
-            width: 100%; 
-            margin-top: 40px; 
-            page-break-inside: avoid; 
-        }
-        .tabela-assinaturas { 
-            width: 100%; 
-            text-align: center; 
-            margin-top: 20px; 
-            border-collapse: collapse; 
-        }
-        .tabela-assinaturas td { 
-            width: 50%; 
-            padding-top: 40px; 
-            padding-bottom: 10px; 
-        }
-        .linha-assinatura { 
-            border-top: 1px solid #000; 
-            width: 80%; 
-            margin: 0 auto; 
-            padding-top: 5px; 
-        }
-        .data-local { 
-            text-align: center; 
-            margin-top: 30px; 
-            margin-bottom: 20px; 
-        }
+        .header { text-align: center; margin-bottom: 25px; }
+        .logo-img { max-width: 320px; height: auto; }
+        .titulo { text-align: center; font-size: 12pt; font-weight: bold; text-decoration: underline; margin-bottom: 20px; }
+        .texto-justificado { text-align: justify; margin-bottom: 10px; }
+        .tabela-dados { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        .tabela-dados td { padding: 3px 0; vertical-align: bottom; }
+        .bold { font-weight: bold; }
+        .clausula-titulo { font-weight: bold; margin-top: 15px; margin-bottom: 5px; text-decoration: underline; }
+        .item-lista { margin-left: 20px; text-align: justify; margin-bottom: 5px; }
+        .container-assinaturas { width: 100%; margin-top: 40px; page-break-inside: avoid; }
+        .tabela-assinaturas { width: 100%; text-align: center; margin-top: 20px; border-collapse: collapse; }
+        .tabela-assinaturas td { width: 50%; padding-top: 40px; padding-bottom: 10px; }
+        .linha-assinatura { border-top: 1px solid #000; width: 80%; margin: 0 auto; padding-top: 5px; }
+        .data-local { text-align: center; margin-top: 30px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
     <div id="background">
-        <img src="{{ imagem_fundo }}" style="width: 100%;">
+        <img src="{{ imagem_fundo }}">
     </div>
 
     <div class="header">
         <img src="{{ logo_javis }}" class="logo-img">
     </div>
 
-    <div class="titulo">
-        Termo de Compromisso do Aluno
-    </div>
+    <div class="titulo">Termo de Compromisso do Aluno</div>
 
     <div class="texto-justificado">
         Pelo presente instrumento particular, as partes a seguir qualificadas:<br>
