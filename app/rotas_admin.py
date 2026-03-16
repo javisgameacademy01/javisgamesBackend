@@ -2076,11 +2076,12 @@ TEMPLATE_HTML_CONTRATO = """
         promovido pelo PROJETO SOCIAL.
     </div>
 
-    <div class="clausula-titulo">Cláusula Segunda - Das Condições do Curso</div>
+    <div class="clausula-titulo">Cláusula Segunda – Das Condições do Curso</div>
     <div class="texto-justificado">
-        1. O curso será ministrado com carga horária correspondente ao projeto escolhido.<br>
-        2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde - CEP 78050-000 - Cuiabá/MT - Presencial nos dias e horários estipulados pela coordenação.<br>
-        3. O PROJETO DE CURSO DE {{ curso }} se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
+        1. O curso será ministrado de _____/____/_______ a _____/____/_______, com carga horária de 60 horas, distribuídas em 24 aulas.<br>
+        2. As aulas ocorrerão na Av. Historiador Rubens de Mendonça, 1593, Bosque da Saúde – CEP 78050-000 – Cuiabá/MT – Presencial nos dias e horários abaixo;<br>
+        Dias: ___________________ | Horário: _____: _____hs.<br>
+        3. O PROJETO DE CURSO DE <strong>{{ curso }}</strong> se compromete a oferecer a infraestrutura necessária para a realização do curso, incluindo material didático e acesso à plataforma, caso seja necessário.
     </div>
 
     <div class="clausula-titulo">Cláusula Terceira - Das Obrigações do(a) Aluno(a)</div>
@@ -2127,7 +2128,7 @@ TEMPLATE_HTML_CONTRATO = """
         </div>
 
         <div class="data-local">
-            Cuiabá - MT, ______ de __________________________ de 20____.
+            Cuiabá - MT, ______ de __________________________ de 2026.
         </div>
 
         <table class="tabela-assinaturas">
