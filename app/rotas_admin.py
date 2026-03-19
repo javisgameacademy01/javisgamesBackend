@@ -39,8 +39,8 @@ from app.modelos import (
     AulaExperimentalCreate,
     AulaExperimentalUpdate
 )
-# ASAAS_API_KEY = "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjJlOWY3NzZiLThiZjAtNDI4MC1hOGJmLWZlZDA1ZDllMjk1OTo6JGFhY2hfNjU2M2VkODktNmNhNy00NDdkLWI3ZTEtNzc2ZGRhZmIyOTdm"
-# ASAAS_URL = "https://api.asaas.com/v3"
+ASAAS_API_KEY = os.getenv("ASAAS_API_KEY")
+ASAAS_URL = "https://api.asaas.com/v3"
 
 headers_asaas = {
     "access_token": ASAAS_API_KEY,
@@ -2450,37 +2450,38 @@ TEMPLATE_HTML_CONTRATO_PRIVADO = """
     <div class="quebra-pagina"></div>
     <div class="titulo-carne">CARNÊ DE PAGAMENTO - JAVIS GAME ACADEMY</div>
 
-    {% if parcelas and parcelas > 0 %}
-        {% for p in range(parcelas) %}
-        <div class="carne-card">
-            <div class="carne-header">
-                PARCELA {{ p + 1 }} DE {{ parcelas }}
-                <span style="float: right;">Vencimento: Dia {{ vencimento }}</span>
-            </div>
-            <div class="carne-body">
-                <div class="carne-linha"><span class="bold">Aluno(a):</span> {{ aluno_nome }}</div>
-                <div class="carne-linha"><span class="bold">Responsável Financeiro:</span> {{ responsavel_nome if responsavel_nome else aluno_nome }} - CPF: {{ responsavel_cpf if responsavel_cpf else aluno_cpf }}</div>
-                <div class="carne-linha"><span class="bold">Curso:</span> {{ curso_oficial }}</div>
-                
-                <table style="width: 100%; margin-top: 10px;">
-                    <tr>
-                        <td style="width: 50%; font-size: 12pt;"><span class="bold">VALOR DA PARCELA:</span> R$ {{ "%.2f"|format(valor_total / parcelas) }}</td>
-                        <td style="width: 50%;">
-                            <div class="assinatura-carne">Assinatura do Recebedor / Carimbo</div>
-                            <div style="font-size: 8pt; margin-top: 5px; float: right;">Data Pagto: ____/____/20___</div>
-                        </td>
-                    </tr>
-                </table>
-            </div>
+    {% for p in parcelas_asaas %}
+    <div class="carne-card">
+        <div class="carne-header">
+            PARCELA {{ p.numero }} DE {{ total_parcelas }}
+            <span style="float: right;">Vencimento: {{ p.vencimento }}</span>
         </div>
-        {% endfor %}
-    {% else %}
-        <div style="text-align: center; padding: 50px; border: 2px dashed red; color: red;">
-            <h2>ATENÇÃO</h2>
-            <p>O número de parcelas ou o valor total não foi informado durante a matrícula.</p>
-            <p>Não é possível gerar o carnê de pagamento.</p>
+        <div class="carne-body">
+            <div style="display: table; width: 100%;">
+                <div style="display: table-cell; width: 70%; vertical-align: top;">
+                    <div class="carne-linha"><span class="bold">Aluno:</span> {{ aluno_nome }}</div>
+                    <div class="carne-linha"><span class="bold">Beneficiário:</span> JAVIS GAME ACADEMY</div>
+                    <div class="carne-linha"><span class="bold">Código de Barras:</span></div>
+                    <div style="font-family: monospace; font-size: 8pt; background: #eee; padding: 5px; margin-top: 5px;">
+                        {{ p.linha_digitavel }}
+                    </div>
+                </div>
+                <div style="display: table-cell; width: 30%; text-align: center;">
+                    <p style="font-size: 7pt; font-weight: bold; margin-bottom: 2px;">PAGAR VIA PIX</p>
+                    <img src="{{ p.pix_base64 }}" style="width: 80px; height: 80px; border: 1px solid #000;">
+                </div>
+            </div>
+            <table style="width: 100%; margin-top: 10px;">
+                <tr>
+                    <td style="font-size: 12pt;"><span class="bold">VALOR:</span> R$ {{ "%.2f"|format(p.valor) }}</td>
+                    <td style="text-align: right; font-size: 8pt;">
+                        Bônus de Pontualidade: R$ 60,00 se pago até o dia 08
+                    </td>
+                </tr>
+            </table>
         </div>
-    {% endif %}
+    </div>
+    {% endfor %}
 
 </body>
 </html>
@@ -2492,160 +2493,155 @@ TEMPLATE_HTML_CONTRATO_PRIVADO = """
 @router.post("/gerar-contrato-privado-html")
 async def gerar_contrato_privado_endpoint(dados: ContratoData, authorization: str = Header(None)):
     try:
-        # 1. VALIDAÇÃO E CONTEXTO DO VENDEDOR
+        # 1. CONTEXTO DO VENDEDOR
         id_vendedor = None
         id_unidade_vendedor = 1
         if authorization:
             token = authorization.split(" ")[1]
             ctx = get_contexto_usuario(token)
-            if ctx["nivel"] != 3 and ctx["nivel"] < 8:
-                raise HTTPException(status_code=403, detail="Acesso restrito.")
             id_vendedor = ctx["id_colaborador"]
             id_unidade_vendedor = ctx["id_unidade"]
 
         nome_oficial_curso = dados.curso.upper()
-        horario_limpo = dados.horario_aula
-        if not horario_limpo or horario_limpo in ["A definir", "A combinar", "A combinar com a coordenação"]:
-            horario_limpo = "A combinar"
+        horario_limpo = dados.horario_aula if dados.horario_aula else "A definir"
 
-        # 2. GERAÇÃO DO PDF COM JINJA E UPLOAD
+        # 2. INTEGRAÇÃO FINANCEIRA (ASAAS)
+        nome_fin = dados.responsavel_nome if dados.responsavel_nome else dados.aluno_nome
+        cpf_fin = dados.responsavel_cpf if dados.responsavel_cpf else dados.aluno_cpf
+        
+        customer_id = criar_ou_buscar_cliente_asaas(nome_fin, cpf_fin, dados.email, dados.whatsapp)
+        res_cobranca = gerar_cobranca_parcelada_asaas(customer_id, dados.valor_total, dados.parcelas)
+        
+        installment_id = res_cobranca.get("installment")
+        url_fatura_completa = res_cobranca.get("invoiceUrl")
+        
+        # Pega dados de PIX e Boleto para cada folha do carnê
+        dados_parcelas = obter_detalhes_parcelas_asaas(installment_id)
+
+        # 3. GERAÇÃO DO PDF (CONTRATO + CARNÊ)
         template = Template(TEMPLATE_HTML_CONTRATO_PRIVADO)
         html_renderizado = template.render(
-            curso_oficial=nome_oficial_curso, horario_aula=horario_limpo, aluno_nome=dados.aluno_nome,
-            aluno_cpf=dados.aluno_cpf, aluno_nascimento=dados.aluno_nascimento, whatsapp=dados.whatsapp,
-            endereco=dados.endereco, bairro=dados.bairro, cep=dados.cep, responsavel_nome=dados.responsavel_nome,
-            responsavel_cpf=dados.responsavel_cpf, responsavel_rg=dados.responsavel_rg,
-            valor_total=dados.valor_total, parcelas=dados.parcelas, vencimento=dados.vencimento
+            curso_oficial=nome_oficial_curso,
+            horario_aula=horario_limpo, 
+            aluno_nome=dados.aluno_nome,
+            aluno_cpf=dados.aluno_cpf,
+            aluno_nascimento=dados.aluno_nascimento,
+            whatsapp=dados.whatsapp,
+            endereco=dados.endereco,
+            bairro=dados.bairro,
+            cep=dados.cep,
+            responsavel_nome=dados.responsavel_nome,
+            responsavel_cpf=dados.responsavel_cpf,
+            responsavel_rg=dados.responsavel_rg,
+            valor_total=dados.valor_total,
+            parcelas=dados.parcelas,
+            vencimento=8, # Travado no dia 8
+            parcelas_asaas=dados_parcelas, # Lista para o loop do carnê
+            total_parcelas=dados.parcelas
         )
 
         pdf_file = io.BytesIO()
         pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
-        pdf_bytes = pdf_file.getvalue()
-
-        # Nome do arquivo (agora não precisa do prefixo 'Privado_' já que o bucket é exclusivo)
+        
         nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
-        
-        # Faz o upload diretamente para o seu novo bucket
-        supabase.storage.from_("privado_contrato").upload(nome_arquivo, pdf_bytes, file_options={"content-type": "application/pdf", "upsert": "true"})
-        
-        # Pega a URL gerada
+        supabase.storage.from_("privado_contrato").upload(nome_arquivo, pdf_file.getvalue(), file_options={"content-type": "application/pdf"})
         url_pdf = supabase.storage.from_("privado_contrato").get_public_url(nome_arquivo)
 
-        # ========================================================
-        # 3. SALVAMENTO NO BANCO DE DADOS (SEPARAÇÃO TOTAL)
-        # ========================================================
-        
-        # A. Salva o Contrato na tabela exclusiva para Privados
+        # 4. SALVAMENTO NO BANCO (SUPABASE)
+        # Salva o contrato
         supabase.table("tb_contratos_privados").insert({
-            "aluno_nome": dados.aluno_nome,
-            "aluno_cpf": dados.aluno_cpf,
-            "responsavel_nome": dados.responsavel_nome,
-            "curso": dados.curso,
-            "valor_total": dados.valor_total,
-            "parcelas": dados.parcelas,
-            "url_pdf": url_pdf,
-            "id_vendedor": id_vendedor,
-            "id_unidade": id_unidade_vendedor
+            "aluno_nome": dados.aluno_nome, "aluno_cpf": dados.aluno_cpf, "url_pdf": url_pdf,
+            "valor_total": dados.valor_total, "id_vendedor": id_vendedor
         }).execute()
 
-        # B. Cadastra o Aluno no Sistema (Sem login de acesso inicial)
+        # Cadastra Aluno e Matrícula
         nasc_formatado = dados.aluno_nascimento.replace("-", "")[:8] if dados.aluno_nascimento else None
         aluno_resp = supabase.table("tb_alunos").insert({
-            "nome_completo": dados.aluno_nome.upper(),
-            "cpf": dados.aluno_cpf,
-            "email": dados.email,
-            "celular": dados.whatsapp,
-            "data_nascimento": nasc_formatado,
-            "id_unidade": id_unidade_vendedor
+            "nome_completo": dados.aluno_nome.upper(), "cpf": dados.aluno_cpf, "email": dados.email,
+            "celular": dados.whatsapp, "data_nascimento": nasc_formatado, 
+            "id_unidade": id_unidade_vendedor, "id_asaas": customer_id
         }).execute()
-        
-        if aluno_resp.data:
-            novo_id_aluno = aluno_resp.data[0]["id_aluno"]
-            
-            # --- INTEGRAÇÃO ASAAS ---
-            try:
-                # 1. Cria o cliente no Asaas (Usa dados do responsável ou do aluno) [cite: 1, 3]
-                nome_fin = dados.responsavel_nome if dados.responsavel_nome else dados.aluno_nome
-                cpf_fin = dados.responsavel_cpf if dados.responsavel_cpf else dados.aluno_cpf
-                
-                asaas_customer_id = criar_ou_buscar_cliente_asaas(
-                    nome_fin, cpf_fin, dados.email, dados.whatsapp
-                )
-                
-                # 2. Gera o parcelamento no Asaas fixado no dia 08 
-                url_pagamento_asaas = gerar_cobranca_parcelada_asaas(
-                    asaas_customer_id, dados.valor_total, dados.parcelas, 8
-                )
-                
-                # Opcional: Salvar o ID do Asaas no seu banco para controle futuro
-                supabase.table("tb_alunos").update({"id_asaas": asaas_customer_id}).eq("id_aluno", novo_id_aluno).execute()
-                
-            except Exception as e_asaas:
-                logger.error(f"Erro na comunicação com Asaas: {str(e_asaas)}")
-                url_pagamento_asaas = None
 
-            # 3. Vincula o Aluno à Turma 
-            if dados.turma_codigo:
-                supabase.table("tb_matriculas").insert({
-                    "id_aluno": novo_id_aluno, 
-                    "codigo_turma": dados.turma_codigo, 
-                    "id_vendedor": id_vendedor, 
-                    "status_financeiro": "Ok"
-                }).execute()
+        if aluno_resp.data and dados.turma_codigo:
+            aid = aluno_resp.data[0]["id_aluno"]
+            supabase.table("tb_matriculas").insert({
+                "id_aluno": aid, "codigo_turma": dados.turma_codigo, "status_financeiro": "Ok"
+            }).execute()
 
-            # 4. Gera as parcelas financeiras no seu banco local para espelhamento 
-            # (Mantemos isso para você ter relatórios internos sem depender 100% da API do Asaas)
-            if dados.valor_total > 0 and dados.parcelas > 0:
-                valor_parcela = dados.valor_total / dados.parcelas
-                parcelas_db = []
-                for i in range(1, dados.parcelas + 1):
-                    # Lógica de datas para o dia 08 
-                    # ... (mesma lógica de loop de parcelas anterior)
-                supabase.table("tb_financeiro").insert(parcelas_db).execute()
+            # Salva parcelas no financeiro local
+            parcelas_locais = []
+            for p in dados_parcelas:
+                parcelas_locais.append({
+                    "id_aluno": aid, "numero_parcela": p["numero"], "valor": p["valor"],
+                    "data_vencimento": datetime.strptime(p["vencimento"], "%d/%m/%Y").strftime("%Y-%m-%d"),
+                    "id_asaas_cobranca": p["id_asaas"], "status": "Pendente"
+                })
+            supabase.table("tb_financeiro").insert(parcelas_locais).execute()
 
-        # Retornamos o PDF do contrato e, se quiser, pode retornar também o link do Asaas
-        return {
-            "status": "success", 
-            "url_pdf": url_pdf, 
-            "url_asaas": url_pagamento_asaas
-        }
+        return {"status": "success", "url_pdf": url_pdf, "url_asaas": url_fatura_completa}
+
     except Exception as e:
-        logger.error(f"Erro ao gerar contrato PDF Privado: {str(e)}")
+        logger.error(f"Erro Crítico: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 def criar_ou_buscar_cliente_asaas(nome, cpf, email, telefone):
-    # Tenta buscar cliente pelo CPF
-    search_url = f"{ASAAS_URL}/customers?cpfCnpj={cpf}"
+    # Limpa CPF para busca
+    cpf_limpo = ''.join(filter(str.isdigit, cpf))
+    search_url = f"{ASAAS_URL}/customers?cpfCnpj={cpf_limpo}"
     res = requests.get(search_url, headers=headers_asaas).json()
     
     if res.get("data"):
         return res["data"][0]["id"]
     
-    # Se não existir, cria um novo
     payload = {
         "name": nome,
-        "cpfCnpj": cpf,
+        "cpfCnpj": cpf_limpo,
         "email": email,
         "mobilePhone": telefone
     }
     new_res = requests.post(f"{ASAAS_URL}/customers", json=payload, headers=headers_asaas).json()
     return new_res.get("id")
 
-def gerar_cobranca_parcelada_asaas(customer_id, valor_total, parcelas, vencimento_dia):
+def gerar_cobranca_parcelada_asaas(customer_id, valor_total, parcelas):
     hoje = datetime.now()
-    # Define a data do primeiro vencimento para o dia 08 do próximo mês 
-    primeiro_vencimento = (hoje.replace(day=vencimento_dia) + timedelta(days=32)).replace(day=vencimento_dia)
+    # Primeiro vencimento sempre no dia 08 do mês seguinte
+    proximo_mes = (hoje.replace(day=1) + timedelta(days=32))
+    primeiro_vencimento = proximo_mes.replace(day=8)
     
     payload = {
         "customer": customer_id,
-        "billingType": "UNDEFINED", # Permite que o cliente escolha PIX, Boleto ou Cartão
+        "billingType": "UNDEFINED", # Cliente escolhe como pagar
         "value": valor_total,
         "installmentCount": parcelas,
-        "installmentValue": round(valor_total / parcelas, 2),
         "dueDate": primeiro_vencimento.strftime("%Y-%m-%d"),
         "description": "Mensalidades Javis Game Academy"
     }
     
     res = requests.post(f"{ASAAS_URL}/payments", json=payload, headers=headers_asaas).json()
-    return res.get("invoiceUrl") # Retorna o link do carnê completo do Asaas
+    return res
+
+def obter_detalhes_parcelas_asaas(installment_id):
+    # Busca todas as faturas do parcelamento
+    url = f"{ASAAS_URL}/payments?installment={installment_id}"
+    res = requests.get(url, headers=headers_asaas).json()
+    
+    parcelas_detalhadas = []
+    for payment in res.get("data", []):
+        pay_id = payment["id"]
+        
+        # Busca Linha Digitável do Boleto
+        res_boleto = requests.get(f"{ASAAS_URL}/payments/{pay_id}/identificationField", headers=headers_asaas).json()
+        
+        # Busca QR Code do PIX
+        res_pix = requests.get(f"{ASAAS_URL}/payments/{pay_id}/pixQrCode", headers=headers_asaas).json()
+        
+        parcelas_detalhadas.append({
+            "id_asaas": pay_id,
+            "numero": payment.get("installmentNumber"),
+            "vencimento": datetime.strptime(payment.get("dueDate"), "%Y-%m-%d").strftime("%d/%m/%Y"),
+            "valor": payment.get("value"),
+            "linha_digitavel": res_boleto.get("identificationField"),
+            "pix_base64": f"data:image/png;base64,{res_pix.get('encodedImage')}"
+        })
+    
+    return sorted(parcelas_detalhadas, key=lambda x: x['numero'])
