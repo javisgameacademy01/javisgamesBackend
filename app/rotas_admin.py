@@ -44,7 +44,8 @@ class ContratoData(BaseModel):
     # Campos que o Site e o Painel enviam
     curso: str
     aluno_nome: str
-    horario_aula: Optional[str] = "A definir"  # ADICIONADO AQUI
+    horario_aula: Optional[str] = "A definir" 
+    turma_codigo: Optional[str] = None
     aluno_cpf: Optional[str] = None
     aluno_nascimento: str
     whatsapp: Optional[str] = None
@@ -2484,58 +2485,108 @@ TEMPLATE_HTML_CONTRATO_PRIVADO = """
 @router.post("/gerar-contrato-privado-html")
 async def gerar_contrato_privado_endpoint(dados: ContratoData, authorization: str = Header(None)):
     try:
+        # 1. VALIDAÇÃO E CONTEXTO DO VENDEDOR
+        id_vendedor = None
+        id_unidade_vendedor = 1
         if authorization:
             token = authorization.split(" ")[1]
             ctx = get_contexto_usuario(token)
             if ctx["nivel"] != 3 and ctx["nivel"] < 8:
                 raise HTTPException(status_code=403, detail="Acesso restrito.")
+            id_vendedor = ctx["id_colaborador"]
+            id_unidade_vendedor = ctx["id_unidade"]
 
-        # Pega exatamente o nome que o vendedor escolheu (ex: GAME PRO ou DESIGN START)
         nome_oficial_curso = dados.curso.upper()
-
         horario_limpo = dados.horario_aula
         if not horario_limpo or horario_limpo in ["A definir", "A combinar", "A combinar com a coordenação"]:
             horario_limpo = "A combinar"
 
+        # 2. GERAÇÃO DO PDF COM JINJA E UPLOAD
         template = Template(TEMPLATE_HTML_CONTRATO_PRIVADO)
-        
-        # O Jinja renderiza o HTML e faz o cálculo matemático (valor_total / parcelas) dos carnês
         html_renderizado = template.render(
-            curso_oficial=nome_oficial_curso,
-            horario_aula=horario_limpo, 
-            aluno_nome=dados.aluno_nome,
-            aluno_cpf=dados.aluno_cpf,
-            aluno_nascimento=dados.aluno_nascimento,
-            whatsapp=dados.whatsapp,
-            endereco=dados.endereco,
-            bairro=dados.bairro,
-            cep=dados.cep,
-            responsavel_nome=dados.responsavel_nome,
-            responsavel_cpf=dados.responsavel_cpf,
-            responsavel_rg=dados.responsavel_rg,
-            # DADOS FINANCEIROS ENVIADOS PARA O CARNÊ
-            valor_total=dados.valor_total,
-            parcelas=dados.parcelas,
-            vencimento=dados.vencimento
+            curso_oficial=nome_oficial_curso, horario_aula=horario_limpo, aluno_nome=dados.aluno_nome,
+            aluno_cpf=dados.aluno_cpf, aluno_nascimento=dados.aluno_nascimento, whatsapp=dados.whatsapp,
+            endereco=dados.endereco, bairro=dados.bairro, cep=dados.cep, responsavel_nome=dados.responsavel_nome,
+            responsavel_cpf=dados.responsavel_cpf, responsavel_rg=dados.responsavel_rg,
+            valor_total=dados.valor_total, parcelas=dados.parcelas, vencimento=dados.vencimento
         )
 
         pdf_file = io.BytesIO()
         pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
         pdf_bytes = pdf_file.getvalue()
 
-        # Salva o arquivo com "Privado_" no nome para você diferenciar fácil no seu painel
-        nome_arquivo = f"Privado_Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
+        # Nome do arquivo (agora não precisa do prefixo 'Privado_' já que o bucket é exclusivo)
+        nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
         
-        supabase.storage.from_("termos").upload(nome_arquivo, pdf_bytes, file_options={"content-type": "application/pdf", "upsert": "true"})
-        url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
+        # Faz o upload diretamente para o seu novo bucket
+        supabase.storage.from_("privado_contrato").upload(nome_arquivo, pdf_bytes, file_options={"content-type": "application/pdf", "upsert": "true"})
+        
+        # Pega a URL gerada
+        url_pdf = supabase.storage.from_("privado_contrato").get_public_url(nome_arquivo)
 
-        # Salva no banco de dados
-        dados_db = dados.model_dump()
-        dados_db["url_pdf"] = url_pdf
-        dados_db["visualizado"] = False 
-        dados_db["matriculado"] = False
+        # ========================================================
+        # 3. SALVAMENTO NO BANCO DE DADOS (SEPARAÇÃO TOTAL)
+        # ========================================================
         
-        supabase.table("tb_geracao_termos").insert(dados_db).execute()
+        # A. Salva o Contrato na tabela exclusiva para Privados
+        supabase.table("tb_contratos_privados").insert({
+            "aluno_nome": dados.aluno_nome,
+            "aluno_cpf": dados.aluno_cpf,
+            "responsavel_nome": dados.responsavel_nome,
+            "curso": dados.curso,
+            "valor_total": dados.valor_total,
+            "parcelas": dados.parcelas,
+            "url_pdf": url_pdf,
+            "id_vendedor": id_vendedor,
+            "id_unidade": id_unidade_vendedor
+        }).execute()
+
+        # B. Cadastra o Aluno no Sistema (Sem login de acesso inicial)
+        nasc_formatado = dados.aluno_nascimento.replace("-", "")[:8] if dados.aluno_nascimento else None
+        aluno_resp = supabase.table("tb_alunos").insert({
+            "nome_completo": dados.aluno_nome.upper(),
+            "cpf": dados.aluno_cpf,
+            "email": dados.email,
+            "celular": dados.whatsapp,
+            "data_nascimento": nasc_formatado,
+            "id_unidade": id_unidade_vendedor
+        }).execute()
+        
+        if aluno_resp.data:
+            novo_id_aluno = aluno_resp.data[0]["id_aluno"]
+
+            # C. Vincula o Aluno à Turma
+            if dados.turma_codigo:
+                supabase.table("tb_matriculas").insert({
+                    "id_aluno": novo_id_aluno, 
+                    "codigo_turma": dados.turma_codigo, 
+                    "id_vendedor": id_vendedor, 
+                    "status_financeiro": "Ok"
+                }).execute()
+
+            # D. Gera as parcelas financeiras automaticamente (tb_financeiro)
+            if dados.valor_total > 0 and dados.parcelas > 0:
+                valor_parcela = dados.valor_total / dados.parcelas
+                parcelas_db = []
+                hoje = datetime.now()
+                
+                for i in range(1, dados.parcelas + 1):
+                    # Calcula o mês seguinte mantendo o dia de vencimento escolhido
+                    mes_vencimento = (hoje.month + i - 1) % 12 + 1
+                    ano_vencimento = hoje.year + ((hoje.month + i - 1) // 12)
+                    data_venc = f"{ano_vencimento}-{mes_vencimento:02d}-{dados.vencimento:02d}"
+                    
+                    parcelas_db.append({
+                        "id_aluno": novo_id_aluno,
+                        "numero_parcela": i,
+                        "total_parcelas": dados.parcelas,
+                        "valor": round(valor_parcela, 2),
+                        "data_vencimento": data_venc,
+                        "status": "Pendente",
+                        "tipo": "Mensalidade"
+                    })
+                
+                supabase.table("tb_financeiro").insert(parcelas_db).execute()
 
         return {"status": "success", "url_pdf": url_pdf}
 
