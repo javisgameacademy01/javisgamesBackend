@@ -10,7 +10,6 @@ import time
 import json
 import requests
 import logging
-import time
 import io
 from jinja2 import Template
 from xhtml2pdf import pisa
@@ -2067,11 +2066,8 @@ TEMPLATE_HTML_CONTRATO = """
 @router.post("/gerar-contrato-html")
 async def gerar_contrato_endpoint(dados: ContratoData, authorization: str = Header(None)):
     try:
-        # Se vier PERFORMANCE GAMER ou o nome antigo, padroniza para o que você quer no PDF
-        if dados.curso in ["PERFORMANCE GAMER", "DESIGNER START"]:
-            nome_oficial_curso = "PERFORMANCE GAMER"
-        else:
-            nome_oficial_curso = dados.curso
+        # Pega exatamente o nome que o vendedor escolheu (ex: PERFORMANCE GAME ou GAME DEV)
+        nome_oficial_curso = dados.curso.upper()
 
         horario_limpo = dados.horario_aula
         if not horario_limpo or horario_limpo in ["A definir", "A combinar", "A combinar com a coordenação"]:
@@ -2128,11 +2124,8 @@ async def regenerar_todos_os_contratos():
         template = Template(TEMPLATE_HTML_CONTRATO)
 
         for d in contratos:
-            c_nome = d.get("curso", "")
-            if c_nome in ["PERFORMANCE GAMER", "DESIGNER START"]:
-                oficial = "PERFORMANCE GAMER"
-            else:
-                oficial = c_nome
+            c_nome = d.get("curso", "").upper()
+            oficial = c_nome
             
             horario_aluno = d.get("horario_aula")
             if not horario_aluno or horario_aluno in ["A definir", "A combinar", "A combinar com a coordenação"]:
@@ -2225,4 +2218,327 @@ def alternar_status_matricula_termo(id_termo: int, dados: dict, authorization: s
         supabase.table("tb_geracao_termos").update({"matriculado": matriculado}).eq("id", id_termo).execute()
         return {"message": "Status de matrícula atualizado com sucesso."}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================================
+# CONTRATO PRIVADO (COMERCIAL / PAGANTES)
+# ========================================================
+
+TEMPLATE_HTML_CONTRATO_PRIVADO = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 2cm 2cm 2.5cm 2cm; }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #000; line-height: 1.4; }
+        
+        .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+        .logo-text { font-size: 16pt; font-weight: bold; margin: 0; padding: 0; }
+        .sub-header { font-size: 11pt; font-weight: bold; margin-top: 5px; }
+        
+        .texto-justificado { text-align: justify; margin-bottom: 10px; }
+        .bold { font-weight: bold; }
+        
+        .tabela-dados { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 9pt; }
+        .tabela-dados td { border: 1px solid #ccc; padding: 5px; vertical-align: middle; }
+        .tabela-dados th { background-color: #f3f4f6; text-align: left; padding: 5px; border: 1px solid #ccc; }
+        
+        .clausula-titulo { font-weight: bold; margin-top: 15px; margin-bottom: 5px; text-decoration: underline; font-size: 10pt; }
+        
+        /* ESTILOS DO CARNÊ (IMPRESSÃO) */
+        .quebra-pagina { page-break-before: always; }
+        .titulo-carne { text-align: center; font-size: 16pt; font-weight: bold; border-bottom: 2px dashed #000; margin-bottom: 20px; padding-bottom: 10px; }
+        .carne-card { width: 100%; border: 1px solid #000; margin-bottom: 15px; border-radius: 5px; page-break-inside: avoid; }
+        .carne-header { background-color: #000; color: #fff; font-weight: bold; padding: 5px 10px; font-size: 11pt; }
+        .carne-body { padding: 10px; display: table; width: 100%; }
+        .carne-linha { margin-bottom: 8px; font-size: 10pt; border-bottom: 1px dotted #ccc; padding-bottom: 2px; }
+        .assinatura-carne { text-align: right; margin-top: 20px; border-top: 1px solid #000; display: inline-block; width: 250px; padding-top: 5px; font-size: 8pt; float: right; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo-text">JAVIS GAME ACADEMY - UNIDADE CUIABÁ</div>
+        <div class="sub-header">CONTRATO DE PRESTAÇÃO DE SERVIÇOS DE TREINAMENTO PROFISSIONAL</div>
+    </div>
+
+    <div class="texto-justificado">
+        Pelo presente instrumento particular de contrato de prestação de serviços de treinamento profissional em computação a, <strong>AJA EDUCAÇÃO E ENTRETENIMENTO LTDA</strong>, doravante denominada <strong>ESCOLA</strong>, pessoa jurídica de direito privado, inscrita no CNPJ sob nº 46.422.995/0001-80 com sede na Avenida Historiador Rubens de Mendonça 1593, Bairro Bosque da Saúde, Cuiabá - MT.
+    </div>
+
+    <table class="tabela-dados">
+        <tr><th colspan="4">DADOS DO CONTRATANTE (RESPONSÁVEL FINANCEIRO)</th></tr>
+        <tr>
+            <td colspan="2"><span class="bold">Nome:</span> {{ responsavel_nome if responsavel_nome else aluno_nome }}</td>
+            <td><span class="bold">CPF:</span> {{ responsavel_cpf if responsavel_cpf else aluno_cpf }}</td>
+            <td><span class="bold">RG:</span> {{ responsavel_rg }}</td>
+        </tr>
+        <tr>
+            <td colspan="2"><span class="bold">Endereço:</span> {{ endereco }}</td>
+            <td><span class="bold">Bairro:</span> {{ bairro }}</td>
+            <td><span class="bold">CEP:</span> {{ cep }}</td>
+        </tr>
+        <tr>
+            <td colspan="4"><span class="bold">Telefone/WhatsApp:</span> {{ whatsapp }}</td>
+        </tr>
+    </table>
+
+    <table class="tabela-dados">
+        <tr><th colspan="3">DADOS DO BENEFICIÁRIO (ALUNO)</th></tr>
+        <tr>
+            <td colspan="2"><span class="bold">Nome:</span> {{ aluno_nome }}</td>
+            <td><span class="bold">Data de Nasc.:</span> {{ aluno_nascimento }}</td>
+        </tr>
+        <tr>
+            <td colspan="3"><span class="bold">Curso Contratado:</span> {{ curso_oficial }} | <span class="bold">Horário:</span> {{ horario_aula }}</td>
+        </tr>
+    </table>
+
+    <div class="texto-justificado">Resolvem contratar sob as seguintes cláusulas:</div>
+
+    <div class="clausula-titulo">CLÁUSULA PRIMEIRA:</div>
+    <div class="texto-justificado">O BENEFICIÁRIO ingressará no programa de capacitação profissional em computação que será ministrado nas dependências da ESCOLA.</div>
+
+    <div class="clausula-titulo">CLÁUSULA SEGUNDA:</div>
+    <div class="texto-justificado">
+        {% if curso_oficial == 'GAME DEV' %}
+            A duração deste programa de capacitação é de 12 (Doze) meses, dividido em 7 (sete) módulos, com total de 120 (Cento e vinte) horas aulas.
+        {% elif curso_oficial == 'DESIGN START' or curso_oficial == 'DESIGNER START' %}
+            A duração deste programa de capacitação é de 12 (Doze) meses, dividido em 9 (nove) módulos, com total de 120 (Cento e vinte) horas aulas.
+        {% elif curso_oficial == 'GAME PRO' %}
+            A duração deste programa de capacitação é de 12 (Doze) meses, dividido em 5 (cinco) módulos, com total de 120 (Cento e vinte) horas aulas.
+        {% else %}
+            A duração deste programa de capacitação é de 12 (Doze) meses.
+        {% endif %}
+    </div>
+
+    <div class="clausula-titulo">CLÁUSULA TERCEIRA:</div>
+    <div class="texto-justificado">
+        As unidades e suas disciplinas estão dispostas das seguintes maneiras:<br><br>
+        
+        {% if curso_oficial == 'GAME DEV' %}
+            <span class="bold">MÓDULO 1</span> — SCRATCH + PORTUGOL<br>
+            <span class="bold">MÓDULO 2</span> — PYTHON GAME (Pygame)<br>
+            <span class="bold">MÓDULO 3</span> — NO-CODE PRO (GDevelop)<br>
+            <span class="bold">MÓDULO 4</span> — INDIE POWER (Godot)<br>
+            <span class="bold">MÓDULO 5</span> — CLÁSSICO 2D (GameMaker)<br>
+            <span class="bold">MÓDULO 6</span> — PADRÃO DE INDÚSTRIA (Unity)<br>
+            <span class="bold">MÓDULO 7</span> — ALTO DESEMPENHO (Unreal Engine)
+            
+        {% elif curso_oficial == 'DESIGN START' or curso_oficial == 'DESIGNER START' %}
+            <span class="bold">1️⃣ Módulo</span> — Introdução<br>
+            <span class="bold">2️⃣ Módulo</span> — Photoshop<br>
+            <span class="bold">3️⃣ Módulo</span> — Illustrator<br>
+            <span class="bold">4️⃣ Módulo</span> — InDesign<br>
+            <span class="bold">5️⃣ Módulo</span> — Premiere Pro<br>
+            <span class="bold">6️⃣ Módulo</span> — After Effects<br>
+            <span class="bold">7️⃣ Módulo</span> — Animate<br>
+            <span class="bold">8️⃣ Módulo</span> — Blender<br>
+            <span class="bold">9️⃣ Módulo</span> — Cinema 4D
+            
+        {% elif curso_oficial == 'GAME PRO' %}
+            <span class="bold">MÓDULO 1</span> – FUNDAMENTOS DO PRO-PLAYER<br>
+            <span class="bold">MÓDULO 2</span> – PRO PLAYER 1<br>
+            <span class="bold">MÓDULO 3</span> – E-SPORTS E DESIGNER GAMER<br>
+            <span class="bold">MÓDULO 4</span> – PRO PLAYER 2 E STREAMER<br>
+            <span class="bold">MÓDULO 5</span> – PRO PLAYER AVANÇADO E INGLÊS BÁSICO
+            
+        {% else %}
+            <span class="bold">MÓDULO ÚNICO</span> - {{ curso_oficial }}
+        {% endif %}
+    </div>
+    <div class="clausula-titulo">CLÁUSULA QUARTA:</div>
+    <div class="texto-justificado">O BENEFICIÁRIO começará o seu treinamento OBRIGATORIAMENTE PELA PRIMEIRA UNIDADE.</div>
+    <div class="paragrafo">Parágrafo único: Após o término de uma unidade, o aluno (Beneficiário) estará AUTOMATICAMENTE inscrito na unidade seguinte, até que se completem todos os módulos.</div>
+
+    <div class="clausula-titulo">CLÁUSULA QUINTA:</div>
+    <div class="texto-justificado">O material didático referente a UNIDADE será disponibilizado através da plataforma on-line da ESCOLA, sendo disponibilizado no ato da matrícula o login e senha para acesso ao portal, tendo a ESCOLA até o início das aulas para liberar o acesso do BENEFICIÁRIO ao portal do aluno.</div>
+
+    <div class="clausula-titulo">CLÁUSULA SEXTA:</div>
+    <div class="texto-justificado">A data de início do treinamento, bem como disciplinas, dias e horários das novas turmas, terão início com prazo de até 90 dias após assinatura do contrato e serão informadas ao contratante e/ou beneficiário através de circulares, avisos em sala, contato via whatsApp, rede sociais e afixos em quadro de avisos e telefonemas, mensagens de aplicativos, ficando reservado à escola dispor de horários, turmas e disciplinas em conformidade com o que lhe for mais apropriado.</div>
+
+    <div class="clausula-titulo">CLÁUSULA SÉTIMA:</div>
+    <div class="texto-justificado">As aulas se darão em uma sala com microcomputadores, tantos quantos forem necessários para que não ultrapasse a razão de 01(um) aluno para cada computador.</div>
+
+    <div class="clausula-titulo">CLÁUSULA OITAVA:</div>
+    <div class="texto-justificado">A Escola promoverá avaliações para verificar o aproveitamento dos alunos, onde somente farão jus ao certificado, o aluno que possuir nota maior ou igual a 7,0 (sete) e frequência maior que 75% (Setenta e cinco por cento) da carga horária do curso.</div>
+    <div class="paragrafo">Parágrafo primeiro: Apenas caberá ao aluno, recurso disponibilizado pela direção acadêmica da Escola contratada. Até no máximo 90 (noventa) dias da conclusão do curso a escola fará a entrega do certificado ao aluno, devendo o mesmo estar com todos os pagamentos quitados.</div>
+
+    <div class="clausula-titulo">CLÁUSULA NONA:</div>
+    <div class="texto-justificado">A FALTA DE FREQÜÊNCIA do aluno ao curso contratado, NÃO O EXIME DO PAGAMENTO DAS PARCELAS, tendo em vista a disponibilidade do serviço colocado ao contratante, salvo os casos de desistências formalmente requeridos através de protocolo.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA:</div>
+    <div class="texto-justificado">Caso o BENEFICIÁRIO falte às aulas e justifique suas faltas através de documentação competente, a ESCOLA providenciará dentro do possível, horários para reposição das mesmas com pagamento de forma antecipada no valor R$100,00 por aula.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA PRIMEIRA:</div>
+    <div class="texto-justificado">Como contraprestação pelos serviços contratados, o contratante pagará mediante a assinatura do contrato o valor da Matricula de R$ 700 (setecentos reais), Material Plataforma R$2.500,00 (Dois mil e quinhentos reais), práticas pedagógicas R$1.000,00 (mil reais) e 12 (doze) parcelas iguais e consecutivas de R$790,90 (Setecentos e noventa e nove reais).<br>A PRIMEIRA PARCELA SERÁ PAGA ANTECIPADAMENTE COMO RESERVA E SINAL DE NEGÓCIO NÃO SENDO DEVOLVIDA SOB HIPÓTESE ALGUMA.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA SEGUNDA:</div>
+    <div class="texto-justificado">Através do PROGRAMA de INCENTIVO INTERNO este CONTRATANTE está sendo beneficiado pelo SISTEMA DE BOLSA PARCIAL e, portanto, terá desconto lhe proporcionando o valor de matrícula de R$300,00 e de 12x de R$385,00 no boleto.</div>
+    <div class="paragrafo">Parágrafo único: pagando até o dia 8 de cada mês, o aluno terá um bônus de pontualidade de R$60,00.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA TERCEIRA:</div>
+    <div class="texto-justificado">Os valores acima poderão sofrer reajustes caso ocorra mudanças na realidade econômica do país, como inflação ou outra forma de desvalorização monetária, sendo nestes casos aplicados os índices de reajustes mensais ou em outra periodicidade que mantenha o equilíbrio econômico do contrato.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA QUARTA:</div>
+    <div class="texto-justificado">O contratante poderá suspender por até 60 (sessenta) dias a prestação de serviço mediante requerimento de trancamento da matricula do beneficiário na secretaria da escola e pagamento da taxa administrativa no valor de R$100,00 mais uma parcela sem bônus, sendo observadas as formalidades contidas nos parágrafos que seguem:</div>
+    <div class="paragrafo">Parágrafo primeiro: O requerimento do trancamento só será deferido caso o contratante esteja com o mês corrente devidamente pago, mesmo que ainda não tenha chegado a data do vencimento.</div>
+    <div class="paragrafo">Parágrafo segundo: O trancamento apenas poderá ser realizado, ao fim de alguma das disciplinas.</div>
+    <div class="paragrafo">Parágrafo terceiro: Durante o período do trancamento, caso o aluno tenha financiado o curso por meio de alguma financeira o pagamento das parcelas por parte do contratante NÃO FICARÁ SUSPENSO, salvo sob autorização por parte da escola.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA QUINTA:</div>
+    <div class="texto-justificado">As TRANSFERÊNCIAS, DESISTÊNCIAS E RESCISÃO CONTRATUAL, somente poderão ser solicitadas pelos contratantes que estiverem com o pagamento das parcelas em dia e através de comunicação por escrito para a secretaria da contratada com antecedência mínima de 15 (quinze) dias.</div>
+    <div class="paragrafo">Parágrafo primeiro: Na transferência de benefícios, será cobrada uma taxa administrativa no valor de R$150,00 (cento e cinquenta reais).</div>
+    <div class="paragrafo">Parágrafo segundo: No caso de desistência ou rescisão contratual, o contratante deverá pagar: I – Está adimplente com qualquer vencimento com a escola ou financeiras respeitar o prazo de 15 (quinze) dias previsto no caput da presente cláusula; II – multa de 20% (vinte por cento) sobre o período restante que não será cursado, como cláusula compensatória prevista no artigo 408 e seguintes do Código Civil. Para cálculo da presente multa, NÃO serão consideradas as parcelas com o abatimento de que trata a cláusula décima segunda deste contrato, tendo a ESCOLA o prazo de até 90 (noventa) dias para proceder o estorno de eventual crédito ao beneficiário. Para cálculo da multa contratual, não será feita em cima de valores de ofertas, bolsas ou descontos promocionais e sim, em valores tabelados do curso do ano de exercício da clausula décima primeira; III – É facultado ao Beneficiário compensar eventual crédito decorrente da rescisão do contrato nas dependências da ESCOLA com outros serviços como GAMER PARTY (festas de aniversários), PASSAPORTES, SÓCIO JOGADOR E OUTROS.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA SEXTA:</div>
+    <div class="texto-justificado">Não fica caracterizado como rescisão do contrato ou suspensão da prestação de serviço, o abandono das aulas ou a falta de ingresso em uma turma após o término de uma disciplina por meio do aluno.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA SÉTIMA:</div>
+    <div class="texto-justificado">Em caso de troca de turma por iniciativa do beneficiário, será paga uma taxa no valor de R$ 35,00 (Trinta e Cinco reais).</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA OITAVA:</div>
+    <div class="texto-justificado">Caso haja redução da turma em 50% (cinquenta por cento) por desistência ou outro motivo qualquer, haverá remanejamento da mesma para outros dias e horários, não sendo este motivo para rescisão contratual por culpa do contratado.</div>
+
+    <div class="clausula-titulo">CLÁUSULA DÉCIMA NONA:</div>
+    <div class="texto-justificado">O CONTRATANTE se obriga a comunicar à CONTRATADA a eventual mudança de endereço, através de requerimento protocolizado no Atendimento ao Cliente da unidade, bem como atualizar seus dados cadastrais sempre que houver alguma alteração.</div>
+    <div class="paragrafo">Parágrafo único: A falta de comunicação de que trata este artigo sujeitará o CONTRATANTE a arcar com todos os prejuízos que essa omissão acarretar.</div>
+
+    <div class="clausula-titulo">CLÁUSULA VIGÉSIMA:</div>
+    <div class="texto-justificado">A CONTRATADA não se responsabilizará perante o CONTRATANTE por qualquer perda, danos, extravio ou furto de objetos e/ou veículos em suas dependências.</div>
+
+    <div class="clausula-titulo">CLÁUSULA VIGÉSIMA PRIMEIRA:</div>
+    <div class="texto-justificado">Não será permitido acompanhante de qualquer idade em sala de aula, salvo as pessoas com deficiência (s), mediante comprovação e autorização antecipada da gerência da unidade educativa.</div>
+
+    <div class="clausula-titulo">CLÁUSULA VIGÉSIMA SEGUNDA:</div>
+    <div class="texto-justificado">Não é permitida a entrada e a permanência de pessoas portando qualquer tipo de armas, bebidas alcoólicas e substâncias proibidas por lei nas dependências da CONTRATADA.</div>
+    <div class="paragrafo">Parágrafo primeiro: (Obrigações do aluno) o aluno beneficiário deste contrato deverá observar os princípios, comportamento e conduta ética, moral, disciplinar e de respeito às normas de boa convivência coletiva e a qualquer integrante da comunidade escolar, necessários e compatíveis ao desenvolvimento da educação e ensino, sob pena de expulsão do estabelecimento de ensino, fazendo assim o termino de contrato isentando a contratada de qualquer valor de taxas ou multas. A instituição possui exposto na entrada dos laboratórios o manual de regras das dependências da unidade JAVIS GAME ACADEMY para apreciação de qualquer aluno ou responsável. É de responsabilidade do ALUNO CONTRATANTE, zelar pelos computadores e tabletes disponibilizados para execução de sua aula. Em caso de perda, quebra ou extravio será de responsabilidade do CONTRATANTE em uso arcar com os prejuízos causados na escola.</div>
+
+    <div class="clausula-titulo">CLÁUSULA VIGÉSIMA TERCEIRA:</div>
+    <div class="texto-justificado">O atraso no pagamento das mensalidades importará em multa de 2% (dois por cento) sobre a parcela devida, juros de mora de 0,033% (zero virgula zero trinta e três por cento) pro rata dia e correção monetária, podendo o contratante inscrever o nome do devedor no serviço de Proteção ao Crédito (SCPC) e SERASA.</div>
+
+    <div class="clausula-titulo">CLÁUSULA VIGÉSIMA QUARTA:</div>
+    <div class="texto-justificado">Havendo inadimplemento no pagamento das parcelas, eventualmente, tendo a CONTRATADA se utilizada de serviços advocatícios para a cobrança de valores em aberto, o CONTRATANTE pagará honorários advocatícios extrajudiciais em percentual não superior a 10% (dez por cento) do valor total do débito, nos termos do at. 4º, 6º - III, 54, parágrafo 4º da lei 8.078/90 (CDC) e art. 22 lei 8906/94, podendo a CONTRATADA, socorrer-se de todos os meios legais necessários à satisfação de seus direitos.</div>
+
+    <div class="clausula-titulo">CLÁUSULA VIGÉSIMA QUINTA:</div>
+    <div class="texto-justificado">O contratante afirma, neste ato, que LEU E ENTENDEU CLARAMENTE o presente contrato e todas suas cláusulas, concordando e aceitando todos os seus termos.</div>
+
+    <div style="margin-top: 50px; text-align: center; page-break-inside: avoid;">
+        <p>Cuiabá - MT, ______ de __________________________ de 2026.</p>
+        <br><br><br>
+        <table style="width: 100%; text-align: center; border-collapse: collapse;">
+            <tr>
+                <td style="width: 50%; padding: 0 20px;">
+                    <div style="border-top: 1px solid #000; padding-top: 5px;"><strong>AJA EDUCAÇÃO E ENTRETENIMENTO LTDA</strong><br>CNPJ: 46.422.995/0001-80</div>
+                </td>
+                <td style="width: 50%; padding: 0 20px;">
+                    <div style="border-top: 1px solid #000; padding-top: 5px;"><strong>ASSINATURA DO CONTRATANTE</strong><br>Responsável Financeiro</div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="quebra-pagina"></div>
+    <div class="titulo-carne">CARNÊ DE PAGAMENTO - JAVIS GAME ACADEMY</div>
+
+    {% if parcelas and parcelas > 0 %}
+        {% for p in range(parcelas) %}
+        <div class="carne-card">
+            <div class="carne-header">
+                PARCELA {{ p + 1 }} DE {{ parcelas }}
+                <span style="float: right;">Vencimento: Dia {{ vencimento }}</span>
+            </div>
+            <div class="carne-body">
+                <div class="carne-linha"><span class="bold">Aluno(a):</span> {{ aluno_nome }}</div>
+                <div class="carne-linha"><span class="bold">Responsável Financeiro:</span> {{ responsavel_nome if responsavel_nome else aluno_nome }} - CPF: {{ responsavel_cpf if responsavel_cpf else aluno_cpf }}</div>
+                <div class="carne-linha"><span class="bold">Curso:</span> {{ curso_oficial }}</div>
+                
+                <table style="width: 100%; margin-top: 10px;">
+                    <tr>
+                        <td style="width: 50%; font-size: 12pt;"><span class="bold">VALOR DA PARCELA:</span> R$ {{ "%.2f"|format(valor_total / parcelas) }}</td>
+                        <td style="width: 50%;">
+                            <div class="assinatura-carne">Assinatura do Recebedor / Carimbo</div>
+                            <div style="font-size: 8pt; margin-top: 5px; float: right;">Data Pagto: ____/____/20___</div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div style="text-align: center; padding: 50px; border: 2px dashed red; color: red;">
+            <h2>ATENÇÃO</h2>
+            <p>O número de parcelas ou o valor total não foi informado durante a matrícula.</p>
+            <p>Não é possível gerar o carnê de pagamento.</p>
+        </div>
+    {% endif %}
+
+</body>
+</html>
+"""
+
+# ========================================================
+# NOVA ROTA: GERAR CONTRATO PRIVADO + CARNÊ
+# ========================================================
+@router.post("/gerar-contrato-privado-html")
+async def gerar_contrato_privado_endpoint(dados: ContratoData, authorization: str = Header(None)):
+    try:
+        if authorization:
+            token = authorization.split(" ")[1]
+            ctx = get_contexto_usuario(token)
+            if ctx["nivel"] != 3 and ctx["nivel"] < 8:
+                raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+        # Pega exatamente o nome que o vendedor escolheu (ex: GAME PRO ou DESIGN START)
+        nome_oficial_curso = dados.curso.upper()
+
+        horario_limpo = dados.horario_aula
+        if not horario_limpo or horario_limpo in ["A definir", "A combinar", "A combinar com a coordenação"]:
+            horario_limpo = "A combinar"
+
+        template = Template(TEMPLATE_HTML_CONTRATO_PRIVADO)
+        
+        # O Jinja renderiza o HTML e faz o cálculo matemático (valor_total / parcelas) dos carnês
+        html_renderizado = template.render(
+            curso_oficial=nome_oficial_curso,
+            horario_aula=horario_limpo, 
+            aluno_nome=dados.aluno_nome,
+            aluno_cpf=dados.aluno_cpf,
+            aluno_nascimento=dados.aluno_nascimento,
+            whatsapp=dados.whatsapp,
+            endereco=dados.endereco,
+            bairro=dados.bairro,
+            cep=dados.cep,
+            responsavel_nome=dados.responsavel_nome,
+            responsavel_cpf=dados.responsavel_cpf,
+            responsavel_rg=dados.responsavel_rg,
+            # DADOS FINANCEIROS ENVIADOS PARA O CARNÊ
+            valor_total=dados.valor_total,
+            parcelas=dados.parcelas,
+            vencimento=dados.vencimento
+        )
+
+        pdf_file = io.BytesIO()
+        pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
+        pdf_bytes = pdf_file.getvalue()
+
+        # Salva o arquivo com "Privado_" no nome para você diferenciar fácil no seu painel
+        nome_arquivo = f"Privado_Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
+        
+        supabase.storage.from_("termos").upload(nome_arquivo, pdf_bytes, file_options={"content-type": "application/pdf", "upsert": "true"})
+        url_pdf = supabase.storage.from_("termos").get_public_url(nome_arquivo)
+
+        # Salva no banco de dados
+        dados_db = dados.model_dump()
+        dados_db["url_pdf"] = url_pdf
+        dados_db["visualizado"] = False 
+        dados_db["matriculado"] = False
+        
+        supabase.table("tb_geracao_termos").insert(dados_db).execute()
+
+        return {"status": "success", "url_pdf": url_pdf}
+
+    except Exception as e:
+        logger.error(f"Erro ao gerar contrato PDF Privado: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
