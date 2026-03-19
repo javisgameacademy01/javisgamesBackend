@@ -2174,3 +2174,55 @@ async def regenerar_todos_os_contratos():
     except Exception as e:
         logger.error(f"Erro na regeneração em massa: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================
+# GESTÃO DE TERMOS E CONTRATOS (PAINEL)
+# =========================================
+
+@router.get("/listar-termos")
+def listar_todos_os_termos(authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+    
+    # Restrição: Apenas Comercial (3) e Gerência (8+) podem ver os contratos
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8: 
+        raise HTTPException(status_code=403, detail="Acesso restrito.")
+
+    try:
+        # Busca todos os contratos gerados, do mais recente para o mais antigo
+        return supabase.table("tb_geracao_termos").select("*").order("created_at", desc=True).execute().data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/termo/{id_termo}/visto")
+def marcar_termo_como_visto(id_termo: int, dados: dict, authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+    
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8: raise HTTPException(status_code=403)
+
+    try:
+        visualizado = dados.get("visualizado", True)
+        supabase.table("tb_geracao_termos").update({"visualizado": visualizado}).eq("id", id_termo).execute()
+        return {"message": "Contrato marcado como visualizado."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/termo/{id_termo}/matricula")
+def alternar_status_matricula_termo(id_termo: int, dados: dict, authorization: str = Header(None)):
+    if not authorization: raise HTTPException(status_code=401)
+    token = authorization.split(" ")[1]
+    ctx = get_contexto_usuario(token)
+    
+    if ctx["nivel"] != 3 and ctx["nivel"] < 8: raise HTTPException(status_code=403)
+
+    try:
+        matriculado = dados.get("matriculado", False)
+        supabase.table("tb_geracao_termos").update({"matriculado": matriculado}).eq("id", id_termo).execute()
+        return {"message": "Status de matrícula atualizado com sucesso."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
