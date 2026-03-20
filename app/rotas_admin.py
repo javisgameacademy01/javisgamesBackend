@@ -2718,155 +2718,57 @@ def obter_detalhes_parcelas_asaas(installment_id):
 
 @router.post("/webhook/asaas")
 async def webhook_asaas(request: Request):
-    """
-    Recebe notificações do Asaas. Se for um pagamento de entrada de pré-matrícula,
-    efetiva o aluno no sistema e gera o parcelamento das mensalidades.
-    """
-    try:
-        payload = await request.json()
-        evento = payload.get("event")
-        pagamento = payload.get("payment")
+    payload = await request.json()
+    if payload.get("event") not in ["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]:
+        return {"status": "ignored"}
 
-        # Só processamos se o pagamento foi confirmado ou recebido
-        if evento not in ["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]:
-            return {"status": "ignored"}
+    id_cobranca = payload['payment']['id']
 
-        id_asaas_cobranca = pagamento.get("id")
-        logger.info(f"🔔 Webhook Asaas: Pagamento confirmado - ID: {id_asaas_cobranca}")
+    # Verifica se esse pagamento é uma entrada de pré-matrícula
+    res_pre = supabase.table("tb_pre_matriculas").select("*").eq("id_asaas_entrada", id_cobranca).maybe_single().execute()
 
-        # 1. BUSCA SE ESTE PAGAMENTO PERTENCE A UMA PRÉ-MATRÍCULA
-        res_pre = supabase.table("tb_pre_matriculas")\
-            .select("*")\
-            .eq("id_asaas_entrada", id_asaas_cobranca)\
-            .eq("status", "Aguardando Pagamento")\
-            .maybe_single().execute()
-
-        if not res_pre.data:
-            # Se não for pré-matrícula, pode ser uma mensalidade comum. 
-            # Damos baixa no financeiro local e encerramos.
-            supabase.table("tb_financeiro").update({"status": "Pago"})\
-                .eq("id_asaas_cobranca", id_asaas_cobranca).execute()
-            return {"status": "ok", "message": "Baixa em mensalidade comum realizada."}
-
-        # --- SE CHEGOU AQUI, É UMA EFETIVAÇÃO DE MATRÍCULA ---
+    if res_pre.data:
         pre_id = res_pre.data['id']
-        dados = res_pre.data['dados_json'] # Dicionário com todos os campos do formulário
-        customer_id = res_pre.data['id_asaas_cliente']
-
-        logger.info(f"🚀 Efetivando matrícula de {dados['aluno_nome']}...")
-
-        # 2. CADASTRA O ALUNO DE VERDADE (tb_alunos)
-        nasc_formatado = dados['aluno_nascimento'].replace("-", "")[:8] if dados.get('aluno_nascimento') else None
+        dados = res_pre.data['dados_json']
+        
+        # 1. EFETIVA O ALUNO (tb_alunos)
         aluno_resp = supabase.table("tb_alunos").insert({
             "nome_completo": dados['aluno_nome'].upper(),
             "cpf": dados['aluno_cpf'],
             "email": dados['email'],
             "celular": dados['whatsapp'],
-            "data_nascimento": nasc_formatado,
             "id_unidade": res_pre.data['id_unidade'],
-            "id_asaas": customer_id
+            "id_asaas": res_pre.data['id_asaas_cliente']
         }).execute()
+        
+        novo_id = aluno_resp.data[0]["id_aluno"]
 
-        if not aluno_resp.data:
-            raise Exception("Falha ao criar aluno no banco definitivo.")
-
-        novo_id_aluno = aluno_resp.data[0]["id_aluno"]
-
-        # 3. VINCULA À TURMA (tb_matriculas)
+        # 2. GERA AS 12 PARCELAS NO ASAAS (Agora de verdade)
+        gerar_cobranca_parcelada_asaas(res_pre.data['id_asaas_cliente'], dados['valor_total'], dados['parcelas'])
+        
+        # 3. VINCULA À TURMA E ATUALIZA STATUS
         if dados.get("turma_codigo"):
-            supabase.table("tb_matriculas").insert({
-                "id_aluno": novo_id_aluno,
-                "codigo_turma": dados["turma_codigo"],
-                "id_vendedor": res_pre.data['id_vendedor'],
-                "status_financeiro": "Ok"
-            }).execute()
-
-        # 4. GERA O PARCELAMENTO DAS MENSALIDADES NO ASAAS
-        # Usamos o valor total e parcelas que foram salvos no JSON
-        res_mensalidades = gerar_cobranca_parcelada_asaas(
-            customer_id, 
-            dados['valor_total'], 
-            dados['parcelas']
-        )
+            supabase.table("tb_matriculas").insert({"id_aluno": novo_id, "codigo_turma": dados["turma_codigo"], "id_vendedor": res_pre.data['id_vendedor']}).execute()
         
-        installment_id = res_mensalidades.get("installment")
-        
-        # 5. BUSCA DETALHES TÉCNICOS PARA ESPELHAMENTO LOCAL
-        dados_parcelas = obter_detalhes_parcelas_asaas(installment_id)
+        supabase.table("tb_pre_matriculas").update({"status": "Pago e Matriculado"}).eq("id", pre_id).execute()
 
-        # 6. REGISTRA AS PARCELAS NO FINANCEIRO LOCAL E A ENTRADA COMO PAGA
-        parcelas_db = []
-        
-        # Registra a Entrada (que já sabemos que foi paga agora)
-        parcelas_db.append({
-            "id_aluno": novo_id_aluno,
-            "valor": dados['valor_entrada'],
-            "data_vencimento": datetime.now().strftime("%Y-%m-%d"),
-            "status": "Pago",
-            "tipo": "Entrada",
-            "id_asaas_cobranca": id_asaas_cobranca
-        })
-
-        # Registra as Mensalidades do Carnê
-        for p in dados_parcelas:
-            parcelas_db.append({
-                "id_aluno": novo_id_aluno,
-                "numero_parcela": p["numero"],
-                "total_parcelas": dados['parcelas'],
-                "valor": p["valor"],
-                "data_vencimento": datetime.strptime(p["vencimento"], "%d/%m/%Y").strftime("%Y-%m-%d"),
-                "status": "Pendente",
-                "tipo": "Mensalidade",
-                "id_asaas_cobranca": p["id_asaas"]
-            })
-        
-        supabase.table("tb_financeiro").insert(parcelas_db).execute()
-
-        # 7. ATUALIZA STATUS DA PRÉ-MATRÍCULA
-        supabase.table("tb_pre_matriculas").update({"status": "Matriculado"}).eq("id", pre_id).execute()
-
-        logger.info(f"✅ Matrícula de {dados['aluno_nome']} concluída com sucesso via Webhook.")
-        return {"status": "ok", "message": "Matrícula efetivada com sucesso."}
-
-    except Exception as e:
-        logger.error(f"❌ Erro no Webhook Asaas: {str(e)}")
-        # Respondemos 200 mesmo no erro para o Asaas não ficar reenviando o payload infinitamente
-        return {"status": "error", "message": str(e)}
+    return {"status": "ok"}
 
 @router.post("/gerar-pre-matricula")
 async def gerar_pre_matricula(dados: ContratoData, authorization: str = Header(None)):
-    """
-    Inicia o processo de matrícula: cria o cliente no Asaas, gera o PDF do contrato 
-    e salva os dados na tabela de pré-matrícula para aguardar o pagamento da entrada.
-    """
     try:
-        # 1. OBTÉM CONTEXTO DO VENDEDOR
-        id_vendedor = None
-        id_unidade = 1
-        if authorization:
-            token = authorization.split(" ")[1]
-            ctx = get_contexto_usuario(token)
-            id_vendedor = ctx["id_colaborador"]
-            id_unidade = ctx["id_unidade"]
-
-        # 2. INTEGRAÇÃO ASAAS: CRIAR OU BUSCAR CLIENTE
-        # Precisamos do ID do cliente agora para vincular à pré-matrícula
+        ctx = obter_dados_token(authorization)
+        
+        # 1. ASAAS: Criar ou buscar o cliente (precisamos do ID dele)
         nome_fin = dados.responsavel_nome if dados.responsavel_nome else dados.aluno_nome
         cpf_fin = dados.responsavel_cpf if dados.responsavel_cpf else dados.aluno_cpf
-        
-        # Chama a função auxiliar que já configuramos
         customer_id = criar_ou_buscar_cliente_asaas(nome_fin, cpf_fin, dados.email, dados.whatsapp)
 
-        # 3. GERAÇÃO DO PDF DO CONTRATO
-        # Note: Passamos 'parcelas_asaas' como lista vazia [] porque o carnê 
-        # só será gerado de verdade quando a entrada for paga.
-        nome_oficial_curso = dados.curso.upper()
-        horario_limpo = dados.horario_aula if dados.horario_aula else "A definir"
-
+        # 2. PDF: Gerar o contrato (versão preliminar sem o carnê de mensalidades ainda)
         template = Template(TEMPLATE_HTML_CONTRATO_PRIVADO)
         html_renderizado = template.render(
-            curso_oficial=nome_oficial_curso,
-            horario_aula=horario_limpo, 
+            curso_oficial=dados.curso.upper(),
+            horario_aula=dados.horario_aula or "A definir",
             aluno_nome=dados.aluno_nome,
             aluno_cpf=dados.aluno_cpf,
             aluno_nascimento=dados.aluno_nascimento,
@@ -2879,69 +2781,50 @@ async def gerar_pre_matricula(dados: ContratoData, authorization: str = Header(N
             responsavel_rg=dados.responsavel_rg,
             valor_total=dados.valor_total,
             parcelas=dados.parcelas,
-            vencimento=8, 
-            parcelas_asaas=[], # Ainda não há mensalidades geradas no Asaas
+            parcelas_asaas=[], # Lista vazia: carné sai em branco nesta etapa
             total_parcelas=dados.parcelas
         )
 
         pdf_file = io.BytesIO()
         pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
-        pdf_bytes = pdf_file.getvalue()
-
-        # Upload do PDF para o bucket de contratos
-        nome_arquivo = f"Pre_Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
-        supabase.storage.from_("privado_contrato").upload(
-            nome_arquivo, 
-            pdf_bytes, 
-            file_options={"content-type": "application/pdf", "upsert": "true"}
-        )
+        
+        nome_arquivo = f"Pre_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
+        supabase.storage.from_("privado_contrato").upload(nome_arquivo, pdf_file.getvalue(), {"content-type": "application/pdf"})
         url_pdf = supabase.storage.from_("privado_contrato").get_public_url(nome_arquivo)
 
-        # 4. SALVAMENTO NA TABELA DE PRÉ-MATRÍCULA
-        # Salvamos o objeto 'dados' completo em formato JSON para processar depois no Webhook
-        payload_pre = {
+        # 3. SUPABASE: Salva na tb_pre_matriculas para aguardar o PIX da taxa
+        res = supabase.table("tb_pre_matriculas").insert({
             "dados_json": dados.model_dump(),
             "url_contrato": url_pdf,
             "status": "Aguardando Pagamento",
             "id_asaas_cliente": customer_id,
-            "id_vendedor": id_vendedor,
-            "id_unidade": id_unidade
-        }
+            "id_vendedor": ctx["id_colaborador"],
+            "id_unidade": ctx["id_unidade"]
+        }).execute()
 
-        res = supabase.table("tb_pre_matriculas").insert(payload_pre).execute()
-
-        if not res.data:
-            raise Exception("Falha ao registrar pré-matrícula no Supabase.")
-
-        # 5. RETORNO PARA O FRONTEND
-        return {
-            "status": "success", 
-            "url_pdf": url_pdf, 
-            "id_pre": res.data[0]['id'],
-            "message": "Pré-matrícula registrada. O contrato já pode ser baixado."
-        }
-
+        return {"status": "success", "url_pdf": url_pdf, "id_pre": res.data[0]['id']}
     except Exception as e:
-        logging.error(f"Erro em gerar-pre-matricula: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/gerar-pagamento-entrada/{id_pre}")
 async def gerar_pagamento_entrada(id_pre: str):
     pre = supabase.table("tb_pre_matriculas").select("*").eq("id", id_pre).single().execute()
-    dados = pre.data['dados_json']
+    if not pre.data: raise HTTPException(status_code=404)
     
-    # Gera cobrança única (Taxa + Entrada) no Asaas
+    dados = pre.data['dados_json']
+    # Gera PIX da entrada (Taxa + Entrada)
     payload = {
         "customer": pre.data['id_asaas_cliente'],
-        "billingType": "UNDEFINED",
+        "billingType": "PIX",
         "value": dados['valor_entrada'],
         "dueDate": datetime.now().strftime("%Y-%m-%d"),
-        "description": "Taxa de Matrícula e Entrada - Javis"
+        "description": f"Taxa de Matrícula - {dados['aluno_nome']}"
     }
     res_asaas = requests.post(f"{ASAAS_URL}/payments", json=payload, headers=headers_asaas).json()
     
-    # Atualiza a pré-matrícula com o ID da cobrança
+    # Salva o ID dessa cobrança específica na pré-matrícula
     supabase.table("tb_pre_matriculas").update({"id_asaas_entrada": res_asaas['id']}).eq("id", id_pre).execute()
     
     return {"url_pagamento": res_asaas['invoiceUrl']}
+
+
