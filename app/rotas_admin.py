@@ -2,7 +2,7 @@
 Rotas administrativas do sistema
 """
 import os
-from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query, BackgroundTasks, Request
 from pydantic import BaseModel
 from supabase import create_client, Client
 from datetime import datetime, timedelta
@@ -78,6 +78,7 @@ class ContratoData(BaseModel):
     valor_total: Optional[float] = 0.0
     parcelas: Optional[int] = 1
     vencimento: Optional[int] = 10
+    valor_entrada: Optional[float] = 0.0
 
 
 # Logger
@@ -2493,29 +2494,52 @@ TEMPLATE_HTML_CONTRATO_PRIVADO = """
 @router.post("/gerar-contrato-privado-html")
 async def gerar_contrato_privado_endpoint(dados: ContratoData, authorization: str = Header(None)):
     try:
-        # 1. CONTEXTO DO VENDEDOR
+        # 1. VALIDAÇÃO E CONTEXTO DO VENDEDOR
         id_vendedor = None
         id_unidade_vendedor = 1
         if authorization:
             token = authorization.split(" ")[1]
             ctx = get_contexto_usuario(token)
+            # Apenas Comercial (3) ou Gerência (8+) podem operar
+            if ctx["nivel"] != 3 and ctx["nivel"] < 8:
+                raise HTTPException(status_code=403, detail="Acesso restrito.")
             id_vendedor = ctx["id_colaborador"]
             id_unidade_vendedor = ctx["id_unidade"]
 
+        # Limpeza de dados básicos
         nome_oficial_curso = dados.curso.upper()
         horario_limpo = dados.horario_aula if dados.horario_aula else "A definir"
 
         # 2. INTEGRAÇÃO FINANCEIRA (ASAAS)
+        # Identifica quem é o responsável financeiro para o Asaas
         nome_fin = dados.responsavel_nome if dados.responsavel_nome else dados.aluno_nome
         cpf_fin = dados.responsavel_cpf if dados.responsavel_cpf else dados.aluno_cpf
         
+        # A. Cria ou busca o cliente no Asaas
         customer_id = criar_ou_buscar_cliente_asaas(nome_fin, cpf_fin, dados.email, dados.whatsapp)
-        res_cobranca = gerar_cobranca_parcelada_asaas(customer_id, dados.valor_total, dados.parcelas)
+
+        # B. Gera a Cobrança da ENTRADA (Taxa de Matrícula + Valor de Entrada)
+        url_pagamento_entrada = None
+        id_asaas_entrada = None
+        if dados.valor_entrada and dados.valor_entrada > 0:
+            payload_entrada = {
+                "customer": customer_id,
+                "billingType": "UNDEFINED", # Permite PIX, Boleto ou Cartão
+                "value": dados.valor_entrada,
+                "dueDate": datetime.now().strftime("%Y-%m-%d"),
+                "description": f"Taxa de Matrícula e Entrada - {dados.aluno_nome}",
+                "postalService": False
+            }
+            res_ent = requests.post(f"{ASAAS_URL}/payments", json=payload_entrada, headers=headers_asaas).json()
+            url_pagamento_entrada = res_ent.get("invoiceUrl")
+            id_asaas_entrada = res_ent.get("id")
+
+        # C. Gera o Parcelamento das MENSALIDADES
+        res_mensalidades = gerar_cobranca_parcelada_asaas(customer_id, dados.valor_total, dados.parcelas)
+        installment_id = res_mensalidades.get("installment")
         
-        installment_id = res_cobranca.get("installment")
-        url_fatura_completa = res_cobranca.get("invoiceUrl")
-        
-        # Pega dados de PIX e Boleto para cada folha do carnê
+        # D. Busca detalhes técnicos (PIX/Boleto) de cada parcela para o PDF
+        # Note: Isso pode levar alguns segundos devido às múltiplas chamadas ao Asaas
         dados_parcelas = obter_detalhes_parcelas_asaas(installment_id)
 
         # 3. GERAÇÃO DO PDF (CONTRATO + CARNÊ)
@@ -2535,53 +2559,99 @@ async def gerar_contrato_privado_endpoint(dados: ContratoData, authorization: st
             responsavel_rg=dados.responsavel_rg,
             valor_total=dados.valor_total,
             parcelas=dados.parcelas,
-            vencimento=8, # Travado no dia 8
-            parcelas_asaas=dados_parcelas, # Lista para o loop do carnê
+            vencimento=8, # Fixo dia 8 conforme regra da escola
+            parcelas_asaas=dados_parcelas, # Lista com PIX e Linha Digitável
             total_parcelas=dados.parcelas
         )
 
         pdf_file = io.BytesIO()
         pisa.CreatePDF(io.StringIO(html_renderizado), dest=pdf_file)
-        
+        pdf_bytes = pdf_file.getvalue()
+
+        # Upload para o Bucket exclusivo de contratos privados
         nome_arquivo = f"Contrato_{dados.aluno_nome.replace(' ', '_')}_{int(time.time())}.pdf"
-        supabase.storage.from_("privado_contrato").upload(nome_arquivo, pdf_file.getvalue(), file_options={"content-type": "application/pdf"})
+        supabase.storage.from_("privado_contrato").upload(
+            nome_arquivo, 
+            pdf_bytes, 
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
         url_pdf = supabase.storage.from_("privado_contrato").get_public_url(nome_arquivo)
 
-        # 4. SALVAMENTO NO BANCO (SUPABASE)
-        # Salva o contrato
+        # 4. PERSISTÊNCIA NO BANCO DE DADOS (SUPABASE)
+        
+        # A. Salva registro do contrato gerado
         supabase.table("tb_contratos_privados").insert({
-            "aluno_nome": dados.aluno_nome, "aluno_cpf": dados.aluno_cpf, "url_pdf": url_pdf,
-            "valor_total": dados.valor_total, "id_vendedor": id_vendedor
+            "aluno_nome": dados.aluno_nome,
+            "aluno_cpf": dados.aluno_cpf,
+            "url_pdf": url_pdf,
+            "valor_total": dados.valor_total,
+            "id_vendedor": id_vendedor,
+            "id_unidade": id_unidade_vendedor
         }).execute()
 
-        # Cadastra Aluno e Matrícula
+        # B. Cadastra o Aluno
         nasc_formatado = dados.aluno_nascimento.replace("-", "")[:8] if dados.aluno_nascimento else None
         aluno_resp = supabase.table("tb_alunos").insert({
-            "nome_completo": dados.aluno_nome.upper(), "cpf": dados.aluno_cpf, "email": dados.email,
-            "celular": dados.whatsapp, "data_nascimento": nasc_formatado, 
-            "id_unidade": id_unidade_vendedor, "id_asaas": customer_id
+            "nome_completo": dados.aluno_nome.upper(),
+            "cpf": dados.aluno_cpf,
+            "email": dados.email,
+            "celular": dados.whatsapp,
+            "data_nascimento": nasc_formatado,
+            "id_unidade": id_unidade_vendedor,
+            "id_asaas": customer_id # Salva o ID do cliente Asaas para futuras cobranças
         }).execute()
 
-        if aluno_resp.data and dados.turma_codigo:
-            aid = aluno_resp.data[0]["id_aluno"]
-            supabase.table("tb_matriculas").insert({
-                "id_aluno": aid, "codigo_turma": dados.turma_codigo, "status_financeiro": "Ok"
-            }).execute()
+        if aluno_resp.data:
+            novo_id_aluno = aluno_resp.data[0]["id_aluno"]
+            
+            # C. Vincula à Turma
+            if dados.turma_codigo:
+                supabase.table("tb_matriculas").insert({
+                    "id_aluno": novo_id_aluno, 
+                    "codigo_turma": dados.turma_codigo, 
+                    "id_vendedor": id_vendedor, 
+                    "status_financeiro": "Ok"
+                }).execute()
 
-            # Salva parcelas no financeiro local
-            parcelas_locais = []
-            for p in dados_parcelas:
-                parcelas_locais.append({
-                    "id_aluno": aid, "numero_parcela": p["numero"], "valor": p["valor"],
-                    "data_vencimento": datetime.strptime(p["vencimento"], "%d/%m/%Y").strftime("%Y-%m-%d"),
-                    "id_asaas_cobranca": p["id_asaas"], "status": "Pendente"
+            # D. Espelhamento Financeiro Local (Entrada + Mensalidades)
+            parcelas_db = []
+            
+            # Registro da Entrada
+            if id_asaas_entrada:
+                parcelas_db.append({
+                    "id_aluno": novo_id_aluno,
+                    "valor": dados.valor_entrada,
+                    "data_vencimento": datetime.now().strftime("%Y-%m-%d"),
+                    "status": "Pendente",
+                    "tipo": "Entrada",
+                    "id_asaas_cobranca": id_asaas_entrada
                 })
-            supabase.table("tb_financeiro").insert(parcelas_locais).execute()
 
-        return {"status": "success", "url_pdf": url_pdf, "url_asaas": url_fatura_completa}
+            # Registro das Mensalidades do Carnê
+            for p in dados_parcelas:
+                parcelas_db.append({
+                    "id_aluno": novo_id_aluno,
+                    "numero_parcela": p["numero"],
+                    "total_parcelas": dados.parcelas,
+                    "valor": p["valor"],
+                    "data_vencimento": datetime.strptime(p["vencimento"], "%d/%m/%Y").strftime("%Y-%m-%d"),
+                    "status": "Pendente",
+                    "tipo": "Mensalidade",
+                    "id_asaas_cobranca": p["id_asaas"]
+                })
+            
+            if parcelas_db:
+                supabase.table("tb_financeiro").insert(parcelas_db).execute()
+
+        # 5. RETORNO PARA O FRONTEND
+        return {
+            "status": "success", 
+            "url_pdf": url_pdf, 
+            "url_entrada": url_pagamento_entrada # Link para o vendedor enviar via WhatsApp
+        }
 
     except Exception as e:
-        logger.error(f"Erro Crítico: {str(e)}")
+        logger.error(f"Erro Crítico na Geração de Contrato Privado: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def criar_ou_buscar_cliente_asaas(nome, cpf, email, telefone):
@@ -2645,3 +2715,19 @@ def obter_detalhes_parcelas_asaas(installment_id):
         })
     
     return sorted(parcelas_detalhadas, key=lambda x: x['numero'])
+
+@router.post("/webhook/asaas")
+async def webhook_asaas(request: Request):
+    payload = await request.json()
+    evento = payload.get("event")
+    pagamento = payload.get("payment")
+
+    if evento in ["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"]:
+        id_asaas = pagamento.get("id")
+        
+        # Atualiza o status no seu banco de dados local
+        supabase.table("tb_financeiro").update({"status": "Pago"}).eq("id_asaas_cobranca", id_asaas).execute()
+        
+        logger.info(f"Pagamento {id_asaas} confirmado e atualizado no sistema.")
+
+    return {"status": "ok"}
