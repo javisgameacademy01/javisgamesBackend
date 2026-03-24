@@ -5,7 +5,6 @@ import os
 from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query, BackgroundTasks, Request
 from pydantic import BaseModel
 from supabase import create_client, Client
-from flask import request, jsonify
 from datetime import datetime, timedelta, date
 import time
 import json
