@@ -2846,7 +2846,9 @@ async def upsert_sprint(dados: SprintPedagogicaData):
         "check_chamada_assinada": dados.check_chamada_assinada,
         "check_chamada_site": dados.check_chamada_site,
         "check_ligacao_faltantes": dados.check_ligacao_faltantes,
-        "observacoes": dados.observacoes
+        "observacoes": dados.observacoes,
+        "hora_chegada": dados.hora_chegada,
+        "updated_at": "now()"
     }
 
     try:
