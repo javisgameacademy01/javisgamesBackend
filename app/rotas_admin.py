@@ -2876,3 +2876,34 @@ async def get_sprint(turma_id: str):
         return response.data[0]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sprints-pedagogicas/estatisticas/geral")
+async def get_sprint_stats(authorization: str = Header(None)):
+    ctx = obter_dados_token(authorization)
+    if ctx['nivel'] < 4: raise HTTPException(status_code=403)
+
+    try:
+        # Busca os dados da VIEW que criamos
+        res = supabase.table("vw_metricas_sprints").select("*").execute()
+        dados = res.data or []
+
+        # Processamento simples para o gráfico
+        stats = {
+            "media_conformidade": sum(d['conformidade_score'] for d in dados) / len(dados) if dados else 0,
+            "total_sprints": len(dados),
+            "por_professor": {}
+        }
+
+        for d in dados:
+            prof = d['professor_name']
+            if prof not in stats["por_professor"]:
+                stats["por_professor"][prof] = {"sprints": 0, "soma_score": 0}
+            stats["por_professor"][prof]["sprints"] += 1
+            stats["por_professor"][prof]["soma_score"] += d['conformidade_score']
+
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
