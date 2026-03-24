@@ -2831,10 +2831,10 @@ async def gerar_pagamento_entrada(id_pre: str):
 
 @router.post("/sprints-pedagogicas")
 async def upsert_sprint(dados: SprintPedagogicaData):
-    data_hoje = str(date.today())
+    data_alvo = dados.data_aula if dados.data_aula else str(date.today())
     
     payload = {
-        "data_aula": data_hoje,
+        "data_aula": data_alvo,
         "turma_id": dados.turma_id,
         "professor_name": dados.professor_name,
         "check_chegada_cedo": dados.check_chegada_cedo,
