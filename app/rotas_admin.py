@@ -2915,3 +2915,25 @@ async def get_sprint_stats(authorization: str = Header(None)):
         # Retorna erro 400 em vez de 500 para não derrubar o frontend
         raise HTTPException(status_code=400, detail="Erro ao processar métricas. Verifique se a VIEW existe no banco.")
 
+
+@router.delete("/sprints-pedagogicas/{turma_id}")
+async def deletar_sprint_pedagogica(turma_id: str, data: str, authorization: str = Header(None)):
+    """Remove um registro de sprint específico por turma e data."""
+    ctx = obter_dados_token(authorization)
+    if ctx['nivel'] < 4: 
+        raise HTTPException(status_code=403, detail="Permissão insuficiente")
+
+    try:
+        # Remove do Supabase filtrando pela turma e pela data informada
+        res = supabase.table("sprints_pedagogicas")\
+            .delete()\
+            .eq("turma_id", turma_id)\
+            .eq("data_aula", data)\
+            .execute()
+            
+        return {"message": "Registro de teste removido com sucesso", "data": res.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar: {str(e)}")
+
+
+
