@@ -38,7 +38,8 @@ from app.modelos import (
     NovoUsuarioData,
     ItemChamada,
     AulaExperimentalCreate,
-    AulaExperimentalUpdate
+    AulaExperimentalUpdate,
+    SprintPedagogicaData
 )
 ASAAS_API_KEY = os.getenv("ASAAS_API_KEY")
 ASAAS_URL = "https://api.asaas.com/v3"
