@@ -2884,26 +2884,34 @@ async def get_sprint_stats(authorization: str = Header(None)):
     if ctx['nivel'] < 4: raise HTTPException(status_code=403)
 
     try:
-        # Busca os dados da VIEW que criamos
         res = supabase.table("vw_metricas_sprints").select("*").execute()
         dados = res.data or []
 
-        # Processamento simples para o gráfico
+        # Proteção contra divisão por zero se a tabela estiver vazia
+        if not dados:
+            return {
+                "media_conformidade": 0,
+                "total_sprints": 0,
+                "por_professor": {}
+            }
+
         stats = {
-            "media_conformidade": sum(d['conformidade_score'] for d in dados) / len(dados) if dados else 0,
+            "media_conformidade": sum(d.get('conformidade_score', 0) for d in dados) / len(dados),
             "total_sprints": len(dados),
             "por_professor": {}
         }
 
         for d in dados:
-            prof = d['professor_name']
+            prof = d.get('professor_name', 'Não Identificado')
+            score = d.get('conformidade_score', 0)
             if prof not in stats["por_professor"]:
                 stats["por_professor"][prof] = {"sprints": 0, "soma_score": 0}
             stats["por_professor"][prof]["sprints"] += 1
-            stats["por_professor"][prof]["soma_score"] += d['conformidade_score']
+            stats["por_professor"][prof]["soma_score"] += score
 
         return stats
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logging.error(f"Erro nas estatísticas: {str(e)}")
+        # Retorna erro 400 em vez de 500 para não derrubar o frontend
+        raise HTTPException(status_code=400, detail="Erro ao processar métricas. Verifique se a VIEW existe no banco.")
 
