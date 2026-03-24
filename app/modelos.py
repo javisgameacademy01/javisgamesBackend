@@ -9,6 +9,7 @@ from typing import Optional
 class SprintPedagogicaData(BaseModel):
     turma_id: str
     professor_name: str
+    data_aula: Optional[str] = None
     check_chegada_cedo: bool = False
     check_sala_organizada: bool = False
     check_recepcao_alunos: bool = False
