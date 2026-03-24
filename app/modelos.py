@@ -1,8 +1,36 @@
 """
 Modelos Pydantic para validação de dados
 """
+from datetime import date
 from pydantic import BaseModel
 from typing import Optional
+
+class SprintPedagogica(db.Model):
+    __tablename__ = 'sprints_pedagogicas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    data_aula = db.Column(db.Date, default=date.today, nullable=False)
+    turma_id = db.Column(db.String(50), nullable=False)
+    professor_name = db.Column(db.String(100), nullable=False)
+    
+    # Checklist
+    check_chegada_cedo = db.Column(db.Boolean, default=False)
+    check_sala_organizada = db.Column(db.Boolean, default=False)
+    check_recepcao_alunos = db.Column(db.Boolean, default=False)
+    check_foto_grupo_chamada = db.Column(db.Boolean, default=False)
+    check_inicio_horario = db.Column(db.Boolean, default=False)
+    check_foto_pais = db.Column(db.Boolean, default=False)
+    check_chamada_assinada = db.Column(db.Boolean, default=False)
+    check_chamada_site = db.Column(db.Boolean, default=False)
+    check_ligacao_faltantes = db.Column(db.Boolean, default=False)
+    
+    observacoes = db.Column(db.Text)
+
+    # Garante que não teremos duas linhas para a mesma turma no mesmo dia
+    __table_args__ = (
+        db.UniqueConstraint('data_aula', 'turma_id', name='uq_sprint_data_turma'),
+    )
 
 class FestaAniversarioCreate(BaseModel):
     status: str = "PARA_ACONTECER"
