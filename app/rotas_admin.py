@@ -5,7 +5,8 @@ import os
 from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form, Query, BackgroundTasks, Request
 from pydantic import BaseModel
 from supabase import create_client, Client
-from datetime import datetime, timedelta
+from flask import request, jsonify
+from datetime import datetime, timedelta, date
 import time
 import json
 import requests
@@ -2827,4 +2828,58 @@ async def gerar_pagamento_entrada(id_pre: str):
     
     return {"url_pagamento": res_asaas['invoiceUrl']}
 
+@admin_bp.route('/sprints-pedagogicas', methods=['POST'])
+@token_obrigatorio
+def upsert_sprint_pedagogica(usuario_atual):
+    dados = request.get_json()
+    turma_id = dados.get('turma_id')
+    data_hoje = date.today()
 
+    # Verifica se já existe um registro da turma hoje
+    sprint = SprintPedagogica.query.filter_by(turma_id=turma_id, data_aula=data_hoje).first()
+
+    if not sprint:
+        sprint = SprintPedagogica(turma_id=turma_id, data_aula=data_hoje)
+        db.session.add(sprint)
+
+    # Atualiza os campos
+    sprint.professor_name = dados.get('professor_name', 'Professor Javis')
+    sprint.check_chegada_cedo = dados.get('check_chegada_cedo', False)
+    sprint.check_sala_organizada = dados.get('check_sala_organizada', False)
+    sprint.check_recepcao_alunos = dados.get('check_recepcao_alunos', False)
+    sprint.check_foto_grupo_chamada = dados.get('check_foto_grupo_chamada', False)
+    sprint.check_inicio_horario = dados.get('check_inicio_horario', False)
+    sprint.check_foto_pais = dados.get('check_foto_pais', False)
+    sprint.check_chamada_assinada = dados.get('check_chamada_assinada', False)
+    sprint.check_chamada_site = dados.get('check_chamada_site', False)
+    sprint.check_ligacao_faltantes = dados.get('check_ligacao_faltantes', False)
+    sprint.observacoes = dados.get('observacoes', '')
+
+    try:
+        db.session.commit()
+        return jsonify({'mensagem': 'Checklist sincronizado com sucesso!'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'erro': str(e)}), 500
+
+
+@admin_bp.route('/sprints-pedagogicas/<turma_id>', methods=['GET'])
+@token_obrigatorio
+def get_sprint_pedagogica(usuario_atual, turma_id):
+    sprint = SprintPedagogica.query.filter_by(turma_id=turma_id, data_aula=date.today()).first()
+    
+    if not sprint:
+        return jsonify({}), 200 # Retorna vazio se ainda não tem dados hoje
+
+    return jsonify({
+        'check_chegada_cedo': sprint.check_chegada_cedo,
+        'check_sala_organizada': sprint.check_sala_organizada,
+        'check_recepcao_alunos': sprint.check_recepcao_alunos,
+        'check_foto_grupo_chamada': sprint.check_foto_grupo_chamada,
+        'check_inicio_horario': sprint.check_inicio_horario,
+        'check_foto_pais': sprint.check_foto_pais,
+        'check_chamada_assinada': sprint.check_chamada_assinada,
+        'check_chamada_site': sprint.check_chamada_site,
+        'check_ligacao_faltantes': sprint.check_ligacao_faltantes,
+        'observacoes': sprint.observacoes
+    }), 200
