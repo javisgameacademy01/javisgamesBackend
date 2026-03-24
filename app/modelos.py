@@ -20,6 +20,7 @@ class SprintPedagogicaData(BaseModel):
     check_chamada_site: bool = False
     check_ligacao_faltantes: bool = False
     observacoes: Optional[str] = ""
+    hora_chegada: Optional[str] = None
 
 class FestaAniversarioCreate(BaseModel):
     status: str = "PARA_ACONTECER"
