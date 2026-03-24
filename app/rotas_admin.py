@@ -2918,20 +2918,20 @@ async def get_sprint_stats(authorization: str = Header(None)):
 
 @router.delete("/sprints-pedagogicas/{turma_id}")
 async def deletar_sprint_pedagogica(turma_id: str, data: str, authorization: str = Header(None)):
-    """Remove um registro de sprint específico por turma e data."""
+    """Remove um registro de sprint específico por turma e data para limpeza de testes."""
     ctx = obter_dados_token(authorization)
     if ctx['nivel'] < 4: 
         raise HTTPException(status_code=403, detail="Permissão insuficiente")
 
     try:
-        # Remove do Supabase filtrando pela turma e pela data informada
+        # Remove do Supabase filtrando pela turma e pela data exata
         res = supabase.table("sprints_pedagogicas")\
             .delete()\
             .eq("turma_id", turma_id)\
             .eq("data_aula", data)\
             .execute()
             
-        return {"message": "Registro de teste removido com sucesso", "data": res.data}
+        return {"message": "Registro removido com sucesso", "data": res.data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao deletar: {str(e)}")
 
