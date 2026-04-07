@@ -48,6 +48,9 @@ headers_asaas = {
     "Content-Type": "application/json"
 }
 
+class AtualizarAulaPayload(BaseModel):
+    conteudo: str
+
 class ContratoData(BaseModel):
     # Campos que o Site e o Painel enviam
     curso: str
@@ -2935,5 +2938,50 @@ async def deletar_sprint_pedagogica(turma_id: str, data: str, authorization: str
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao deletar: {str(e)}")
 
+@router.get("/admin/aulas-curriculo")
+def listar_aulas_curriculo(authorization: Optional[str] = Header(None)):
+    _get_admin_context(authorization) # Garante que só o staff acede
+    
+    # Busca todas as aulas, ordenadas por ID
+    resp = (
+        supabase.table("aulas")
+        .select("id, titulo, conteudo, modulos(titulo, cursos(titulo))")
+        .order("id")
+        .execute()
+    )
+    
+    aulas = []
+    for a in resp.data or []:
+        curso_nome = "Desconhecido"
+        modulo_nome = "Desconhecido"
+        
+        # Tenta extrair os nomes do curso e módulo da relação
+        if a.get("modulos"):
+            modulo_nome = a["modulos"].get("titulo", "Desconhecido")
+            if a["modulos"].get("cursos"):
+                curso_nome = a["modulos"]["cursos"].get("titulo", "Desconhecido")
+                
+        aulas.append({
+            "id": a["id"],
+            "curso": curso_nome,
+            "modulo": modulo_nome,
+            "titulo": a["titulo"],
+            "conteudo": a["conteudo"]
+        })
+        
+    return aulas
 
-
+@router.put("/admin/aula/{id_aula}")
+def atualizar_conteudo_aula(id_aula: int, payload: AtualizarAulaPayload, authorization: Optional[str] = Header(None)):
+    _get_admin_context(authorization) # Garante que só o staff acede
+    
+    resp = (
+        supabase.table("aulas")
+        .update({"conteudo": payload.conteudo})
+        .eq("id", id_aula)
+        .execute()
+    )
+    
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Aula não encontrada.")
+    return {"message": "Aula atualizada com sucesso!"}
