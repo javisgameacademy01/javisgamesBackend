@@ -90,12 +90,11 @@ def _get_aluno_context(token: str) -> Dict[str, Any]:
 
     turma_by_codigo: Dict[str, Any] = {}
     if codigos:
-        # ATUALIZADO: Agora procuramos também o id_curso na tabela de turmas
         turmas_resp = (
             supabase.table("tb_turmas")
             .select(
-                "codigo_turma, nome_curso, id_curso, id_professor, data_inicio, "
-                "qtd_aulas, status, tipo_turma"
+                "codigo_turma, nome_curso, id_professor, data_inicio, "
+                "qtd_aulas, status, tipo_turma, horario" # <--- SÓ ADICIONAR O 'horario' AQUI
             )
             .in_("codigo_turma", codigos)
             .execute()
