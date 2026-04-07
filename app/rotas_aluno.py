@@ -535,3 +535,79 @@ def meus_contatos(authorization: Optional[str] = Header(None)):
             print("Erro ao buscar professores:", e)
             
     return contatos
+
+
+# =======================================================
+# ROTAS DE CHAT DO ALUNO
+# =======================================================
+
+class ChatDiretoPayload(BaseModel):
+    mensagem: str
+    id_colaborador: Optional[int] = None
+
+class ChatTurmaPayload(BaseModel):
+    codigo_turma: str
+    mensagem: str
+
+@router.get("/chat/mensagens-com/{id_contato}")
+def get_chat_direto(id_contato: str, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    id_aluno = ctx["id_aluno"]
+
+    # Busca as mensagens do aluno
+    query = supabase.table("tb_chat").select("*").eq("id_aluno", id_aluno)
+    
+    # Se for "geral", o id_colaborador é nulo (fala com a Secretaria)
+    if id_contato == 'geral':
+        query = query.is_("id_colaborador", "null")
+    else:
+        query = query.eq("id_colaborador", int(id_contato))
+        
+    resp = query.order("created_at", desc=False).execute()
+    return resp.data or []
+
+@router.post("/chat/enviar-direto")
+def enviar_chat_direto(payload: ChatDiretoPayload, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    
+    novo_chat = {
+        "id_aluno": ctx["id_aluno"],
+        "id_colaborador": payload.id_colaborador,
+        "mensagem": payload.mensagem,
+        "enviado_por_admin": False, # Define que quem enviou foi o aluno
+        "lida": False
+    }
+    
+    resp = supabase.table("tb_chat").insert(novo_chat).execute()
+    return resp.data
+
+@router.get("/chat/turma/{codigo_turma}")
+def get_chat_turma(codigo_turma: str, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    _get_aluno_context(token) # Valida se o aluno existe
+    
+    resp = (
+        supabase.table("tb_chat_turma")
+        .select("*")
+        .eq("codigo_turma", codigo_turma)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return resp.data or []
+
+@router.post("/chat/turma/enviar")
+def enviar_chat_turma(payload: ChatTurmaPayload, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    
+    novo_chat = {
+        "codigo_turma": payload.codigo_turma,
+        "mensagem": payload.mensagem,
+        "nome_exibicao": ctx["nome"], # Pega o nome real do aluno no contexto
+        "cargo_exibicao": "Aluno"
+    }
+    
+    resp = supabase.table("tb_chat_turma").insert(novo_chat).execute()
+    return resp.data
