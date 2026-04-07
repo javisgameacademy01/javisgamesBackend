@@ -699,3 +699,27 @@ def get_agenda_geral(authorization: Optional[str] = Header(None)):
         })
 
     return eventos_agenda
+
+
+@router.put("/chat/marcar-lidas/{id_contato}")
+def marcar_como_lidas(id_contato: str, authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    id_aluno = ctx["id_aluno"]
+
+    # Só marcamos como lidas as mensagens que vieram do admin para este aluno
+    query = (
+        supabase.table("tb_chat")
+        .update({"lida": True})
+        .eq("id_aluno", id_aluno)
+        .eq("enviado_por_admin", True)
+        .eq("lida", False)
+    )
+
+    if id_contato == 'geral':
+        query = query.is_("id_colaborador", "null")
+    else:
+        query = query.eq("id_colaborador", int(id_contato))
+
+    resp = query.execute()
+    return {"atualizadas": len(resp.data or [])}
