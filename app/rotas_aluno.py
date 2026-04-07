@@ -611,3 +611,19 @@ def enviar_chat_turma(payload: ChatTurmaPayload, authorization: Optional[str] = 
     
     resp = supabase.table("tb_chat_turma").insert(novo_chat).execute()
     return resp.data
+
+
+@router.get("/minhas-reposicoes")
+def minhas_reposicoes(authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    id_aluno = ctx["id_aluno"]
+    
+    # Busca as reposições agendadas para este aluno específico
+    resp = (
+        supabase.table("tb_reposicoes")
+        .select("data_reposicao, conteudo_aula, codigo_turma, status, disciplina_kurzy")
+        .eq("id_aluno", id_aluno)
+        .execute()
+    )
+    return resp.data or []
