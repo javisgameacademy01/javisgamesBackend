@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -627,3 +627,62 @@ def minhas_reposicoes(authorization: Optional[str] = Header(None)):
         .execute()
     )
     return resp.data or []
+
+
+@router.get("/agenda-geral")
+def get_agenda_geral(authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    id_aluno = ctx["id_aluno"]
+    
+    eventos_agenda = []
+    
+    # 1. PROJEÇÃO DE AULAS REGULARES
+    # Percorre as turmas onde o aluno está matriculado
+    for cod, turma in ctx.get("turmas_by_codigo", {}).items():
+        data_ini_str = turma.get("data_inicio")
+        qtd_aulas = turma.get("qtd_aulas") or 0
+        nome_curso = turma.get("nome_curso") or "Aula"
+        horario = turma.get("horario") or ""
+        
+        if data_ini_str and qtd_aulas > 0:
+            try:
+                # Converte a data de início para objeto datetime
+                data_inicio = datetime.fromisoformat(data_ini_str.replace("Z", "+00:00"))
+                
+                # Projeta as aulas semanais (uma aula a cada 7 dias)
+                for i in range(qtd_aulas):
+                    data_projetada = data_inicio + timedelta(weeks=i)
+                    eventos_agenda.append({
+                        "title": f"Aula: {nome_curso}",
+                        "start": data_projetada.isoformat(),
+                        "tipo": "regular",
+                        "horario": horario,
+                        "turma": cod,
+                        "color": "#00FFFF", # Ciano para aulas normais
+                        "textColor": "#000"
+                    })
+            except Exception as e:
+                print(f"Erro ao projetar aulas para turma {cod}: {e}")
+
+    # 2. BUSCA DE REPOSIÇÕES REAIS
+    resp_rep = (
+        supabase.table("tb_reposicoes")
+        .select("data_reposicao, conteudo_aula, codigo_turma, status, disciplina_kurzy")
+        .eq("id_aluno", id_aluno)
+        .execute()
+    )
+    
+    for r in resp_rep.data or []:
+        eventos_agenda.append({
+            "title": f"Reposição: {r.get('disciplina_kurzy') or 'Aula'}",
+            "start": r.get("data_reposicao"),
+            "tipo": "reposicao",
+            "status": r.get("status"),
+            "conteudo": r.get("conteudo_aula"),
+            "turma": r.get("codigo_turma"),
+            "color": "#EAB308", # Amarelo para reposições
+            "textColor": "#000"
+        })
+        
+    return eventos_agenda
