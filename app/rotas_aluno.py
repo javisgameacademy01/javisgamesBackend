@@ -485,7 +485,7 @@ def meus_contatos(authorization: Optional[str] = Header(None)):
     
     contatos = []
     
-    # 1. Adiciona sempre o contato da Secretaria/Geral
+    # 1. Contato da Secretaria/Geral (Fixo)
     contatos.append({
         "id": "geral",
         "nome": "Suporte Javis",
@@ -493,7 +493,7 @@ def meus_contatos(authorization: Optional[str] = Header(None)):
         "codigo_turma_grupo": None
     })
     
-    # 2. Busca os professores das turmas que o aluno está matriculado
+    # 2. Busca as turmas ativas do aluno
     ids_professores = []
     turmas_aluno = ctx.get("turmas_by_codigo", {})
     
@@ -502,31 +502,36 @@ def meus_contatos(authorization: Optional[str] = Header(None)):
         if id_prof:
             ids_professores.append(id_prof)
             
-        # 3. Adiciona também o Grupo da Turma como um contato de chat
+        # 3. Adiciona o Grupo da Turma
+        nome_curso_turma = info.get("nome_curso") or ""
         contatos.append({
             "id": f"grupo_{cod}",
-            "nome": f"Grupo {cod}",
-            "cargo": f"Chat da Turma",
+            "nome": f"Grupo {cod} {nome_curso_turma}".strip(),
+            "cargo": "Chat da Turma",
             "codigo_turma_grupo": cod
         })
 
-    # Remove duplicados de IDs de professores
+    # Remove IDs duplicados (caso o mesmo professor dê 2 cursos para o aluno)
     ids_professores = list(set(ids_professores))
     
+    # 4. Busca os nomes reais dos professores na tb_colaboradores
     if ids_professores:
-        prof_resp = (
-            supabase.table("tb_colaboradores")
-            .select("id_colaborador, nome_completo, cargo")
-            .in_("id_colaborador", ids_professores)
-            .execute()
-        )
-        
-        for p in prof_resp.data or []:
-            contatos.append({
-                "id": str(p["id_colaborador"]),
-                "nome": p["nome_completo"],
-                "cargo": p["cargo"] or "Professor",
-                "codigo_turma_grupo": None
-            })
+        try:
+            prof_resp = (
+                supabase.table("tb_colaboradores")
+                .select("id_colaborador, nome_completo")
+                .in_("id_colaborador", ids_professores)
+                .execute()
+            )
+            
+            for p in prof_resp.data or []:
+                contatos.append({
+                    "id": str(p["id_colaborador"]),
+                    "nome": p["nome_completo"],
+                    "cargo": "Professor(a)", # Como veio de id_professor, sabemos o cargo
+                    "codigo_turma_grupo": None
+                })
+        except Exception as e:
+            print("Erro ao buscar professores:", e)
             
     return contatos
