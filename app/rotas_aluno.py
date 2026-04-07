@@ -685,4 +685,17 @@ def get_agenda_geral(authorization: Optional[str] = Header(None)):
             "textColor": "#000"
         })
         
+    # 3. BUSCA DE FERIADOS
+    resp_feriados = supabase.table("tb_feriados").select("data, descricao").execute()
+    
+    for f in resp_feriados.data or []:
+        eventos_agenda.append({
+            "title": f"Feriado: {f.get('descricao')}",
+            "start": f.get("data"),
+            "tipo": "feriado",
+            "color": "#EF4444", # Vermelho para chamar a atenção
+            "textColor": "#FFFFFF",
+            "allDay": True # Marca para ocupar o dia todo no calendário
+        })
+
     return eventos_agenda
