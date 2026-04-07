@@ -475,3 +475,58 @@ def update_senha(payload: SenhaUpdate, authorization: Optional[str] = Header(Non
         raise HTTPException(status_code=400, detail=f"Erro ao atualizar senha: {e}")
 
     return {"ok": True}
+
+
+
+@router.get("/meus-contatos")
+def meus_contatos(authorization: Optional[str] = Header(None)):
+    token = _get_bearer_token(authorization)
+    ctx = _get_aluno_context(token)
+    
+    contatos = []
+    
+    # 1. Adiciona sempre o contato da Secretaria/Geral
+    contatos.append({
+        "id": "geral",
+        "nome": "Suporte Javis",
+        "cargo": "Secretaria / Coordenação",
+        "codigo_turma_grupo": None
+    })
+    
+    # 2. Busca os professores das turmas que o aluno está matriculado
+    ids_professores = []
+    turmas_aluno = ctx.get("turmas_by_codigo", {})
+    
+    for cod, info in turmas_aluno.items():
+        id_prof = info.get("id_professor")
+        if id_prof:
+            ids_professores.append(id_prof)
+            
+        # 3. Adiciona também o Grupo da Turma como um contato de chat
+        contatos.append({
+            "id": f"grupo_{cod}",
+            "nome": f"Grupo {cod}",
+            "cargo": f"Chat da Turma",
+            "codigo_turma_grupo": cod
+        })
+
+    # Remove duplicados de IDs de professores
+    ids_professores = list(set(ids_professores))
+    
+    if ids_professores:
+        prof_resp = (
+            supabase.table("tb_colaboradores")
+            .select("id_colaborador, nome_completo, cargo")
+            .in_("id_colaborador", ids_professores)
+            .execute()
+        )
+        
+        for p in prof_resp.data or []:
+            contatos.append({
+                "id": str(p["id_colaborador"]),
+                "nome": p["nome_completo"],
+                "cargo": p["cargo"] or "Professor",
+                "codigo_turma_grupo": None
+            })
+            
+    return contatos
